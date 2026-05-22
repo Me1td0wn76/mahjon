@@ -1,0 +1,126 @@
+.tile {
+  width: 46px;
+  height: 64px;
+  background: linear-gradient(160deg, #fffef0 0%, #f2ead8 100%);
+  border: 1px solid #b8a88a;
+  border-radius: 6px;
+  box-shadow:
+    2px 3px 5px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  position: relative;
+  flex-shrink: 0;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.tile-small {
+  width: 32px;
+  height: 44px;
+}
+
+.tile-clickable {
+  cursor: pointer;
+}
+
+.tile-clickable:hover {
+  transform: translateY(-7px);
+  box-shadow:
+    2px 8px 14px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.tile-selected {
+  transform: translateY(-14px) !important;
+  box-shadow:
+    2px 14px 22px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  background: linear-gradient(160deg, #fffde0 0%, #f8eaaa 100%);
+  border-color: #d4a020;
+}
+
+.tile-dimmed {
+  opacity: 0.45;
+}
+
+.tile-face-down {
+  background:
+    repeating-linear-gradient(
+      135deg,
+      #1a5432 0px,
+      #1a5432 5px,
+      #143d25 5px,
+      #143d25 10px
+    );
+  border-color: #0f2e1a;
+  box-shadow: 2px 3px 6px rgba(0, 0, 0, 0.55);
+}
+
+/* Suit colors */
+.tile-man .tile-num,
+.tile-man .tile-suit-char {
+  color: #b52020;
+}
+
+.tile-pin .tile-num,
+.tile-pin .tile-suit-char {
+  color: #1a7a3c;
+}
+
+.tile-sou .tile-num,
+.tile-sou .tile-suit-char {
+  color: #1a54a0;
+}
+
+/* Honor tile colors */
+.tile-wind .tile-char {
+  color: #6a2090;
+}
+
+.tile-haku .tile-char {
+  color: #666;
+  text-shadow: 0 0 2px #aaa;
+}
+
+.tile-hatsu .tile-char {
+  color: #1a7a3c;
+}
+
+.tile-chun .tile-char {
+  color: #c01818;
+}
+
+/* Text sizes */
+.tile-num {
+  font-size: 24px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -1px;
+}
+
+.tile-suit-char {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.tile-char {
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.tile-small .tile-num {
+  font-size: 16px;
+}
+
+.tile-small .tile-suit-char {
+  font-size: 9px;
+}
+
+.tile-small .tile-char {
+  font-size: 19px;
+}

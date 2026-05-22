@@ -1,0 +1,6 @@
+.app { min-height: 100vh; }
+.disconnected-banner {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: rgba(180,30,30,0.9); color: #fff;
+  text-align: center; padding: 10px; font-weight: 700; z-index: 200;
+}

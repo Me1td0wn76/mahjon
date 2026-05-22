@@ -1,0 +1,7 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  background: radial-gradient(ellipse at center, #1a5c2a 0%, #0a2a12 100%);
+  min-height: 100vh; color: #fff; -webkit-font-smoothing: antialiased;
+}
+#root { min-height: 100vh; }

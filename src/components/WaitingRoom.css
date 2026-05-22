@@ -1,0 +1,129 @@
+.waiting-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.waiting-box {
+  width: 100%;
+  max-width: 440px;
+  background: rgba(10, 40, 20, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  padding: 36px 32px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+  text-align: center;
+}
+
+.waiting-title {
+  font-size: 1.8rem;
+  font-weight: 900;
+  color: #f0dc60;
+  margin: 0 0 6px;
+}
+
+.waiting-subtitle {
+  color: #8a9e8a;
+  font-size: 0.9rem;
+  margin: 0 0 28px;
+}
+
+.player-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.player-slot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-radius: 11px;
+  border: 1px solid;
+}
+
+.player-slot.occupied {
+  background: rgba(40, 160, 80, 0.12);
+  border-color: rgba(40, 160, 80, 0.35);
+}
+
+.player-slot.empty {
+  background: rgba(0, 0, 0, 0.25);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.slot-wind {
+  font-size: 1.3rem;
+  font-weight: 900;
+  color: #f0dc60;
+  min-width: 28px;
+  text-align: center;
+}
+
+.slot-name {
+  color: #e0f0e0;
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.me-tag {
+  color: #5de08a;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.slot-waiting {
+  color: #555;
+  font-size: 0.9rem;
+  font-style: italic;
+}
+
+.waiting-info {
+  margin-bottom: 20px;
+  font-size: 0.95rem;
+}
+
+.ready-text {
+  color: #5de08a;
+  font-weight: 700;
+}
+
+.waiting-count {
+  color: #aaa;
+}
+
+.btn-start {
+  width: 100%;
+  padding: 14px;
+  background: linear-gradient(135deg, #e8c420, #b88010);
+  border: none;
+  border-radius: 11px;
+  color: #1a1200;
+  font-size: 1.1rem;
+  font-weight: 900;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 2px;
+}
+
+.btn-start:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 22px rgba(200, 160, 20, 0.55);
+}
+
+.btn-start:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.waiting-host {
+  color: #777;
+  font-size: 0.87rem;
+  padding: 14px;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+}
