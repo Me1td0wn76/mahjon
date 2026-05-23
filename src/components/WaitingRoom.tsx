@@ -28,7 +28,7 @@ export const WaitingRoom: React.FC<Props> = ({
   return (
     <div className="waiting-wrap">
       <div className="waiting-box">
-        <h2 className="waiting-title">🀄 {roomName}</h2>
+        <h2 className="waiting-title">{roomName}</h2>
         <p className="waiting-subtitle">{maxPlayers}人麻雀 — プレイヤーを待っています</p>
 
         <div className="player-slots">

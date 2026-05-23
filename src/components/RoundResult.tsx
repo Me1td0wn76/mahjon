@@ -1,5 +1,5 @@
 import React from 'react';
-import { RoundResult, PlayerView, Tile, getTileName, WIND_LABEL } from '../types/mahjong';
+import { type RoundResult, type PlayerView, WIND_LABEL } from '../types/mahjong';
 import { TileComponent } from './TileComponent';
 import './RoundResult.css';
 

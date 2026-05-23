@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RoomInfo } from '../types/mahjong';
+import type { RoomInfo } from '../types/mahjong';
 import './Lobby.css';
 
 interface Props {
@@ -36,7 +36,7 @@ export const Lobby: React.FC<Props> = ({
   return (
     <div className="lobby-wrap">
       <div className="lobby">
-        <h1 className="lobby-title">🀄 麻雀オンライン</h1>
+        <h1 className="lobby-title"> 麻雀オンライン</h1>
 
         <div className={`lobby-status ${connected ? 'connected' : 'disconnected'}`}>
           {connected ? '● サーバー接続中' : '● 接続中...'}

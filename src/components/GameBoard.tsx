@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { GameView, PlayerView, Tile, Meld, getTileName, canTsumoCheck, WIND_LABEL } from '../types/mahjong';
+import { type GameView, type PlayerView, type Tile, type Meld, getTileName, canTsumoCheck, WIND_LABEL } from '../types/mahjong';
 import { TileComponent } from './TileComponent';
 import './GameBoard.css';
 
