@@ -4,11 +4,33 @@ import { Lobby } from "./components/Lobby";
 import { WaitingRoom } from "./components/WaitingRoom";
 import { GameBoard } from "./components/GameBoard";
 import { RoundResultModal } from "./components/RoundResult";
+import { previewGameView } from "./components/boardPreviewData";
 import "./App.css";
 
 type Screen = "lobby" | "waiting" | "game";
 
+// Dev-only: `?preview` renders the board with mock data (no live game needed).
+const isPreview =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).has("preview");
+
 export default function App() {
+  if (isPreview) {
+    return (
+      <div className="app">
+        <GameBoard
+          gameView={previewGameView}
+          onDiscard={() => {}}
+          onClaim={() => {}}
+          onTsumo={() => {}}
+        />
+      </div>
+    );
+  }
+  return <Game />;
+}
+
+function Game() {
   const {
     state,
     getRooms,
@@ -77,7 +99,7 @@ export default function App() {
 
       {!state.connected && screen !== "lobby" && (
         <div className="disconnected-banner">
-          �T�[�o�[�Ƃ̐ڑ����؂�܂���...
+          サーバーとの接続が切れました...
         </div>
       )}
     </div>
