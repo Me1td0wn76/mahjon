@@ -1,0 +1,21 @@
+# Railway / Nixpacks のビルド設定
+# デフォルトの build フェーズは `npm ci && npm run build` だが、
+# install フェーズで既に npm ci 済みのため、2回目の npm ci が
+# /app/node_modules/.cache を rmdir しようとして EBUSY で失敗する。
+# build フェーズを `npm run build` のみに上書きして衝突を回避する。
+
+providers = ["node"]
+
+[phases.setup]
+# Node 18 は 2025-04 で EOL のため 20 LTS に固定
+nixPkgs = ["nodejs_20", "npm-10_x"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+# install フェーズの npm ci を再実行しない（EBUSY 回避）
+cmds = ["npm run build"]
+
+[start]
+cmd = "npm start"
