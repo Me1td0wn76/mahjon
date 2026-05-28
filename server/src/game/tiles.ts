@@ -2,6 +2,7 @@
 // 型定義は ../types.ts からインポートします。
 // import に `.js` 拡張子が付いているのは Node.js の ESM ルールのためで、
 // TS が JS にコンパイルされたあとの参照先を指定しているからです（TSファイルが対応します）。
+import { randomInt } from 'crypto';
 import { Tile, Suit } from '../types.js';
 
 /**
@@ -40,13 +41,16 @@ export function createTileset(playerCount: 3 | 4): Tile[] {
 /**
  * 牌の配列をシャッフル（ランダムに並べ替え）する関数。
  * 「Fisher-Yates シャッフル」と呼ばれる、偏りの少ない有名なアルゴリズム。
+ * 乱数は Node.js の crypto.randomInt（CSPRNG）を使い、Math.random より偏りの少ない
+ * 高品質な乱数で山を切ります。
  */
 export function shuffleTiles(tiles: Tile[]): Tile[] {
   // 引数の配列を直接書き換えないようにスプレッド構文(...)でコピー
   const arr = [...tiles];
   // 後ろから前へ走査して、ランダムな位置の要素と入れ替える
   for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    // randomInt(max) は 0〜max-1 の整数を等確率で返す
+    const j = randomInt(i + 1);
     // [a, b] = [b, a] という記法で2つの値を一度に交換（分割代入）
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }

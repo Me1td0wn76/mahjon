@@ -25,6 +25,7 @@ export type GamePhase =
   | 'draw'
   | 'discard'
   | 'claiming'
+  | 'kyushuCheck'
   | 'roundEnd'
   | 'gameOver';
 
@@ -41,6 +42,14 @@ export interface PlayerView {
   score: number;
   isDealer: boolean;
   seatWind: Wind;
+  isRiichi: boolean;                                         // リーチ中
+  kitaCount: number;                                         // 三麻の北抜き枚数
+}
+
+// 1つの役の表示用情報
+export interface YakuInfo {
+  name: string;
+  han: number;
 }
 
 // クライアントが受け取る「自分視点のゲーム状態」
@@ -49,6 +58,7 @@ export interface GameView {
   round: Wind;
   roundNumber: number;
   honbaCount: number;
+  riichiSticks: number;                                      // 場に出ている供託リーチ棒
   dealer: number;
   currentTurn: number;
   wallCount: number;
@@ -59,17 +69,23 @@ export interface GameView {
   mySeat: number;
   availableClaims?: Array<'chi' | 'pon' | 'ron'>;            // 鳴きの選択肢（あれば）
   chiCombinations?: [string, string][];                      // チーの可能パターン
+  canRiichi?: boolean;                                       // リーチ可能か
+  canKita?: boolean;                                         // 北抜き可能か（三麻）
+  canKyushuhai?: boolean;                                    // 九種九牌宣言可能か
 }
 
 // 局の結果
 export interface RoundResult {
   isDraw: boolean;
+  isKyushuhai?: boolean;                                     // 九種九牌流局か
   winner?: number;
   losers?: number[];
   winTile?: Tile;
   winType?: 'tsumo' | 'ron';
   handTiles?: Tile[];
   melds?: Meld[];
+  yakuList?: YakuInfo[];                                     // 成立役の一覧
+  totalHan?: number;                                         // 合計飜
   scoreDelta: Record<number, number>;
   newScores: Record<number, number>;
 }
@@ -81,6 +97,7 @@ export interface RoomInfo {
   maxPlayers: 3 | 4;
   currentPlayers: number;
   status: 'waiting' | 'playing';
+  isPrivate: boolean;                                        // パスワード付き（プライベート）か
 }
 
 // 風 → 表示用の日本語マッピング

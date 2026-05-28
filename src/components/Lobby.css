@@ -254,6 +254,27 @@
   font-weight: 600;
 }
 
+/* プライベートルーム表示と参加時パスワード欄 */
+.room-private {
+  color: #f0dc60;
+  margin-left: 4px;
+}
+
+.room-password-input {
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.85rem;
+  width: 110px;
+}
+
+.room-password-input:focus {
+  outline: none;
+  border-color: rgba(240, 220, 96, 0.5);
+}
+
 .btn-join {
   padding: 8px 20px;
   background: linear-gradient(135deg, #28a85a, #1c7a40);

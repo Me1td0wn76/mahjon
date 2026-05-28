@@ -23,8 +23,12 @@ export const RoundResultModal: React.FC<Props> = ({ result, players, mySeat, onR
         {result.isDraw ? (
           // === 流局表示 ===
           <>
-            <h2 className="result-title draw">流局</h2>
-            <p className="result-sub">壁牌が尽きました</p>
+            <h2 className="result-title draw">
+              {result.isKyushuhai ? '九種九牌' : '流局'}
+            </h2>
+            <p className="result-sub">
+              {result.isKyushuhai ? '配牌時に么九牌が9種類以上' : '壁牌が尽きました'}
+            </p>
           </>
         ) : (
           // === 和了表示 ===
@@ -55,6 +59,22 @@ export const RoundResultModal: React.FC<Props> = ({ result, players, mySeat, onR
                     <TileComponent key={i} tile={t} small />
                   ))}
                 </div>
+              </div>
+            )}
+            {/* 成立した役と合計飜数の表示 */}
+            {result.yakuList && result.yakuList.length > 0 && (
+              <div className="result-yaku">
+                <h3 className="yaku-title">
+                  役 <span className="yaku-total">{result.totalHan ?? 0}飜</span>
+                </h3>
+                <ul className="yaku-list">
+                  {result.yakuList.map((y, i) => (
+                    <li key={i} className="yaku-item">
+                      <span className="yaku-name">{y.name}</span>
+                      <span className="yaku-han">{y.han}飜</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
           </>

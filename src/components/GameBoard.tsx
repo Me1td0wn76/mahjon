@@ -119,6 +119,12 @@ const PlayerPanel: React.FC<{
       <div className="panel-name">
         {player.name}
         {player.isDealer && <span className="dealer-tag">親</span>}
+        {/* リーチ中バッジ */}
+        {player.isRiichi && <span className="riichi-tag">立直</span>}
+        {/* 三麻の北抜き枚数表示 */}
+        {player.kitaCount > 0 && (
+          <span className="kita-tag">北×{player.kitaCount}</span>
+        )}
       </div>
     </div>
   </div>
@@ -146,14 +152,27 @@ interface Props {
   onDiscard: (tileId: string) => void;
   onClaim: (type: 'chi' | 'pon' | 'ron' | 'skip', chiTiles?: [string, string]) => void;
   onTsumo: () => void;
+  // 以下は省略可能（preview モードでも使えるように）
+  onRiichi?: (tileId: string) => void;
+  onKita?: () => void;
+  onKyushuhai?: () => void;
 }
 
-export const GameBoard: React.FC<Props> = ({ gameView, onDiscard, onClaim, onTsumo }) => {
+export const GameBoard: React.FC<Props> = ({
+  gameView,
+  onDiscard,
+  onClaim,
+  onTsumo,
+  onRiichi,
+  onKita,
+  onKyushuhai,
+}) => {
   // 牌のクリック1回目で「選択中」にし、2回目で確定して捨てる。
-  // ダブルクリック誤爆防止と確認の役割を兼ねる UI。
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // チーの組み合わせが2つ以上ある時、選択UIを出す
   const [showChiSelect, setShowChiSelect] = useState(false);
+  // リーチ宣言モード（true の時、牌クリックでリーチ＋打牌になる）
+  const [riichiMode, setRiichiMode] = useState(false);
 
   // gameView の中身を分割代入で取り出す
   const {
@@ -170,6 +189,10 @@ export const GameBoard: React.FC<Props> = ({ gameView, onDiscard, onClaim, onTsu
     honbaCount,
     availableClaims,
     chiCombinations,
+    riichiSticks,
+    canRiichi,
+    canKita,
+    canKyushuhai,
   } = gameView;
 
   const pc = players.length;
@@ -207,10 +230,17 @@ export const GameBoard: React.FC<Props> = ({ gameView, onDiscard, onClaim, onTsu
   const drawnSeparated = isMyTurn && myHand.length % 3 === 2;
 
   // 牌をクリックした時の処理。1回目で選択、2回目で打牌確定。
-  // useCallback で関数を安定化（再レンダリングのたびに新しい関数を作らない）。
+  // リーチモード中ならクリックでリーチ宣言＋その牌の打牌。
   const handleTileClick = useCallback(
     (tileId: string) => {
       if (!isMyTurn) return;
+      if (riichiMode && onRiichi) {
+        // リーチモード時は確認なしでその牌を選んでリーチ宣言（1クリック）
+        onRiichi(tileId);
+        setRiichiMode(false);
+        setSelectedId(null);
+        return;
+      }
       if (selectedId === tileId) {
         onDiscard(tileId);                                   // 2回目 → 捨てる
         setSelectedId(null);
@@ -218,7 +248,7 @@ export const GameBoard: React.FC<Props> = ({ gameView, onDiscard, onClaim, onTsu
         setSelectedId(tileId);                               // 1回目 → 選択中
       }
     },
-    [isMyTurn, selectedId, onDiscard]
+    [isMyTurn, selectedId, onDiscard, riichiMode, onRiichi]
   );
 
   // チーの組み合わせを選んだ後の処理
@@ -259,6 +289,10 @@ export const GameBoard: React.FC<Props> = ({ gameView, onDiscard, onClaim, onTsu
             {WIND_LABEL[round]}{roundNumber}局
           </span>
           {honbaCount > 0 && <span className="honba-text">{honbaCount}本場</span>}
+          {/* 場に出ているリーチ棒の本数（供託） */}
+          {riichiSticks > 0 && (
+            <span className="riichi-sticks">供託 {riichiSticks}本</span>
+          )}
         </div>
       </div>
 
@@ -419,7 +453,7 @@ export const GameBoard: React.FC<Props> = ({ gameView, onDiscard, onClaim, onTsu
         <div className="action-panel">
           {isMyTurn && (
             <div className="action-row">
-              {selectedId && (
+              {selectedId && !riichiMode && (
                 <button
                   className="btn-action discard"
                   onClick={() => {
@@ -435,7 +469,40 @@ export const GameBoard: React.FC<Props> = ({ gameView, onDiscard, onClaim, onTsu
                   ツモ和了！
                 </button>
               )}
-              {!selectedId && !canTsumo && (
+              {/* リーチボタン: テンパイ & 門前 & 残り山4枚以上のとき表示 */}
+              {canRiichi && onRiichi && !riichiMode && (
+                <button
+                  className="btn-action riichi"
+                  onClick={() => setRiichiMode(true)}
+                >
+                  リーチ
+                </button>
+              )}
+              {/* リーチモード中の案内 + キャンセル */}
+              {riichiMode && (
+                <>
+                  <span className="action-hint">捨てる牌をクリックでリーチ宣言</span>
+                  <button
+                    className="btn-action skip"
+                    onClick={() => setRiichiMode(false)}
+                  >
+                    キャンセル
+                  </button>
+                </>
+              )}
+              {/* 三麻の北抜きボタン */}
+              {canKita && onKita && !riichiMode && (
+                <button className="btn-action kita" onClick={onKita}>
+                  北抜き
+                </button>
+              )}
+              {/* 九種九牌の流局宣言 */}
+              {canKyushuhai && onKyushuhai && !riichiMode && (
+                <button className="btn-action kyushu" onClick={onKyushuhai}>
+                  九種九牌
+                </button>
+              )}
+              {!selectedId && !canTsumo && !riichiMode && (
                 <span className="action-hint">捨てる牌をクリック（2回目で決定）</span>
               )}
             </div>

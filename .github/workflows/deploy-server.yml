@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - master
+    # server に関係するファイルが変わった時だけ走らせる
+    paths:
+      - 'server/**'
+      - '.github/workflows/deploy-server.yml'
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -15,24 +20,21 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '21'
-          cache: 'npm'
-
-      - name: Install dependencies
-        working-directory: server
-        run: npm ci
-
-      - name: Build
-        working-directory: server
-        run: npm run build
+          node-version: '22'
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
+      # Railway の Nixpacks 側で npm ci / npm run build / npm start を行うため
+      # Actions ではビルドせずソースをアップロードするだけにする。
+      # ビルド設定は server/railway.json で管理。
       - name: Deploy to Railway
         working-directory: server
-        run: railway up --detach
+        run: railway up --service ${{ secrets.RAILWAY_SERVICE_NAME }} --detach
         env:
-          # Railway ダッシュボードの Project Settings > Tokens で発行したトークンを
-          # GitHub Secrets に RAILWAY_TOKEN として登録してください
+          # Railway ダッシュボードの Account Settings > Tokens で発行したトークン
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          # 対象プロジェクトの ID (Project Settings > General > Project ID)
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+          # デプロイ先 environment 名 (通常は production)
+          RAILWAY_ENVIRONMENT: ${{ secrets.RAILWAY_ENVIRONMENT }}

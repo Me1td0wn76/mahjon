@@ -51,6 +51,9 @@ function Game() {
     discardTile,
     claimAction,
     declareTsumo,
+    declareRiichi,
+    declareKita,
+    declareKyushuhai,
     readyNext,
     clearError,
   } = useSocket();
@@ -71,13 +74,13 @@ function Game() {
           rooms={state.rooms}
           onGetRooms={getRooms}
           // ボタン押下時の処理。エラーをクリアしてからAPI呼び出し。
-          onCreateRoom={async (name, maxPlayers, playerName) => {
+          onCreateRoom={async (name, maxPlayers, playerName, password) => {
             clearError();
-            await createRoom(name, maxPlayers, playerName);
+            await createRoom(name, maxPlayers, playerName, password);
           }}
-          onJoinRoom={async (roomId, playerName) => {
+          onJoinRoom={async (roomId, playerName, password) => {
             clearError();
-            await joinRoom(roomId, playerName);
+            await joinRoom(roomId, playerName, password);
           }}
           error={state.error}
           connected={state.connected}
@@ -103,6 +106,9 @@ function Game() {
             onDiscard={discardTile}
             onClaim={claimAction}
             onTsumo={declareTsumo}
+            onRiichi={declareRiichi}
+            onKita={declareKita}
+            onKyushuhai={declareKyushuhai}
           />
           {/* 局終了時のモーダル（あるときだけ表示） */}
           {state.roundResult && (

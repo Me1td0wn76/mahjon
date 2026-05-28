@@ -104,26 +104,25 @@ export function useSocket() {
     });
   }, []);
 
-  /** ルームを新規作成。Promise でラップして async/await で扱えるようにしている。 */
+  /** ルームを新規作成。password を渡すとプライベートルームになる。 */
   const createRoom = useCallback(
-    (name: string, maxPlayers: 3 | 4, playerName: string) =>
+    (name: string, maxPlayers: 3 | 4, playerName: string, password?: string) =>
       new Promise<{ success: boolean; roomId?: string; error?: string }>(resolve => {
-        socketRef.current?.emit('create-room', { name, maxPlayers, playerName }, (result: { success: boolean; roomId?: string; error?: string }) => {
+        socketRef.current?.emit('create-room', { name, maxPlayers, playerName, password }, (result: { success: boolean; roomId?: string; error?: string }) => {
           if (result.success && result.roomId) {
-            // 作成成功なら自動的にそのルーム（席0=親）に入った状態に
             setState(s => ({ ...s, joinedRoomId: result.roomId!, mySeat: 0 }));
           }
-          resolve(result);                                   // Promise を解決
+          resolve(result);
         });
       }),
     []
   );
 
-  /** 既存ルームに参加 */
+  /** 既存ルームに参加。プライベートルームなら password が必須。 */
   const joinRoom = useCallback(
-    (roomId: string, playerName: string) =>
+    (roomId: string, playerName: string, password?: string) =>
       new Promise<{ success: boolean; seat?: number; error?: string }>(resolve => {
-        socketRef.current?.emit('join-room', { roomId, playerName }, (result: { success: boolean; seat?: number; error?: string }) => {
+        socketRef.current?.emit('join-room', { roomId, playerName, password }, (result: { success: boolean; seat?: number; error?: string }) => {
           if (result.success) {
             setState(s => ({ ...s, joinedRoomId: roomId, mySeat: result.seat ?? null }));
           }
@@ -156,6 +155,21 @@ export function useSocket() {
     socketRef.current?.emit('declare-tsumo');
   }, []);
 
+  /** リーチ宣言（同時に捨てる牌を指定） */
+  const declareRiichi = useCallback((tileId: string) => {
+    socketRef.current?.emit('declare-riichi', tileId);
+  }, []);
+
+  /** 北抜き（三麻専用） */
+  const declareKita = useCallback(() => {
+    socketRef.current?.emit('declare-kita');
+  }, []);
+
+  /** 九種九牌で流局宣言 */
+  const declareKyushuhai = useCallback(() => {
+    socketRef.current?.emit('declare-kyushuhai');
+  }, []);
+
   /** 局終了後「次の局へ」 */
   const readyNext = useCallback(() => {
     socketRef.current?.emit('ready-next');
@@ -178,6 +192,9 @@ export function useSocket() {
     discardTile,
     claimAction,
     declareTsumo,
+    declareRiichi,
+    declareKita,
+    declareKyushuhai,
     readyNext,
     clearError,
   };
