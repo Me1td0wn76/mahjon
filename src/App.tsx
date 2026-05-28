@@ -1,3 +1,5 @@
+// このファイルは画面全体のルーティング（画面遷移）を管理する React コンポーネント。
+// 「ロビー → 待機室 → ゲーム画面」の3つの画面を状態に応じて切り替える。
 import { useState } from "react";
 import { useSocket } from "./hooks/useSocket";
 import { Lobby } from "./components/Lobby";
@@ -7,15 +9,20 @@ import { RoundResultModal } from "./components/RoundResult";
 import { previewGameView } from "./components/boardPreviewData";
 import "./App.css";
 
+// 現在の画面状態。これも Union 型で「3つのうちのどれか」しか入らない。
 type Screen = "lobby" | "waiting" | "game";
 
-// Dev-only: `?preview` renders the board with mock data (no live game needed).
+// 開発時にレイアウト確認するための特殊モード。URLに ?preview を付けるとモック描画する。
+// `typeof window !== "undefined"` は SSR（サーバー側描画）で window が無い時用のガード。
 const isPreview =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).has("preview");
 
+// `export default` でこのコンポーネントが「このモジュールの主役」となる。
+// `App` はトップレベルの関数コンポーネント。返り値が JSX（画面の見た目）。
 export default function App() {
   if (isPreview) {
+    // モックデータでゲーム画面だけ描画。onXxx は何もしない空関数。
     return (
       <div className="app">
         <GameBoard
@@ -30,7 +37,11 @@ export default function App() {
   return <Game />;
 }
 
+/**
+ * 通信状態とゲーム状態を保持して、画面を切り替える本体コンポーネント。
+ */
 function Game() {
+  // カスタムフック useSocket から、状態と操作関数をまとめて取得（分割代入）。
   const {
     state,
     getRooms,
@@ -44,17 +55,22 @@ function Game() {
     clearError,
   } = useSocket();
 
+  // 現在表示中の画面。useState はReactの「再レンダリングできる変数」を作る仕組み。
   const [screen, setScreen] = useState<Screen>("lobby");
 
+  // 状態変化に応じて自動で画面遷移を進める。
+  // ※注意: 本来 useEffect の中で setState すべきだが、簡略化のため直接呼んでいる。
   if (state.joinedRoomId && screen === "lobby") setScreen("waiting");
   if (state.gameView && screen === "waiting") setScreen("game");
 
   return (
     <div className="app">
+      {/* 条件付きレンダリング: && の左が true の時だけ右をレンダリング */}
       {screen === "lobby" && (
         <Lobby
           rooms={state.rooms}
           onGetRooms={getRooms}
+          // ボタン押下時の処理。エラーをクリアしてからAPI呼び出し。
           onCreateRoom={async (name, maxPlayers, playerName) => {
             clearError();
             await createRoom(name, maxPlayers, playerName);
@@ -73,12 +89,14 @@ function Game() {
           roomName={state.roomInfo.roomName}
           maxPlayers={state.roomInfo.maxPlayers}
           players={state.roomInfo.players}
+          // `??` は左が null/undefined なら右の値（フォールバック）
           mySeat={state.mySeat ?? 0}
           onStartGame={startGame}
         />
       )}
 
       {screen === "game" && state.gameView && (
+        // <> ... </> は React.Fragment の短縮構文。複数要素を1つにまとめるための入れ物。
         <>
           <GameBoard
             gameView={state.gameView}
@@ -86,6 +104,7 @@ function Game() {
             onClaim={claimAction}
             onTsumo={declareTsumo}
           />
+          {/* 局終了時のモーダル（あるときだけ表示） */}
           {state.roundResult && (
             <RoundResultModal
               result={state.roundResult}
@@ -97,6 +116,7 @@ function Game() {
         </>
       )}
 
+      {/* 接続が切れたときに上から被せるバナー */}
       {!state.connected && screen !== "lobby" && (
         <div className="disconnected-banner">
           サーバーとの接続が切れました...

@@ -1,3 +1,6 @@
+// このファイルは「開発用のモックデータ」を提供します。
+// URLに `?preview` を付けると、サーバーに接続せずにこのデータでゲーム盤面の見た目を確認できます。
+// 本番では使わない開発専用。レイアウト調整の効率化のために用意されています。
 import type { GameView, Tile } from '../types/mahjong';
 
 /**
@@ -5,16 +8,22 @@ import type { GameView, Tile } from '../types/mahjong';
  * Visit the app with `?preview` to render it. Safe to delete.
  */
 
+// 牌のユニークIDをカウントアップするためのカウンタ
 let n = 0;
+// 牌オブジェクトを簡潔に作るためのヘルパ。
+// 引数の型に `Tile['suit']` を使うと、Tile 型の suit プロパティの型を直接参照できる。
 const t = (suit: Tile['suit'], value: number): Tile => ({
-  id: `pv-${n++}`,
+  id: `pv-${n++}`,                                           // 後置 `++` で「使ってから増やす」
   suit,
   value,
 });
 
+// 捨て牌の指定をシンプルに書けるユーティリティ。
+// `[Tile['suit'], number][]` は [種類, 数字] のタプルの配列。
 const discards = (specs: [Tile['suit'], number][]): Tile[] =>
   specs.map(([s, v]) => t(s, v));
 
+// プレビュー用のゲーム状態。GameView 型に従って作られているのでそのまま GameBoard に渡せる。
 export const previewGameView: GameView = {
   phase: 'discard',
   round: 'east',
@@ -26,6 +35,7 @@ export const previewGameView: GameView = {
   doraIndicators: [t('sou', 5)],
   lastDiscard: { tile: t('pin', 2), seat: 0 },
   mySeat: 3,
+  // 自分の手牌（14枚 = ツモ後の状態）
   myHand: [
     t('man', 4),
     t('man', 4),
@@ -42,10 +52,11 @@ export const previewGameView: GameView = {
     t('honor', 1),
     t('honor', 3),
   ],
+  // 4人分のプレイヤー公開情報
   players: [
     {
       seat: 0,
-      name: 'マサハル',
+      name: 'hoge',
       handCount: 13,
       discards: discards([['man', 1], ['pin', 9], ['sou', 1], ['honor', 5], ['man', 2], ['pin', 2]]),
       melds: [],
@@ -55,7 +66,7 @@ export const previewGameView: GameView = {
     },
     {
       seat: 1,
-      name: '菊池さん',
+      name: 'huga',
       handCount: 13,
       discards: discards([['sou', 9], ['man', 9], ['honor', 7], ['pin', 1]]),
       melds: [],
@@ -65,7 +76,7 @@ export const previewGameView: GameView = {
     },
     {
       seat: 2,
-      name: 'タックン',
+      name: 'fuga',
       handCount: 13,
       discards: discards([['honor', 2], ['man', 3], ['pin', 8], ['sou', 2], ['man', 5]]),
       melds: [],
@@ -75,7 +86,7 @@ export const previewGameView: GameView = {
     },
     {
       seat: 3,
-      name: 'プレイヤー',
+      name: 'piyo',
       handCount: 14,
       discards: discards([['honor', 6], ['sou', 3], ['man', 1], ['pin', 7]]),
       melds: [],

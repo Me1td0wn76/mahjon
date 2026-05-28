@@ -1,0 +1,38 @@
+name: Deploy Mahjong Server
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '21'
+          cache: 'npm'
+
+      - name: Install dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Build
+        working-directory: server
+        run: npm run build
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        working-directory: server
+        run: railway up --detach
+        env:
+          # Railway ダッシュボードの Project Settings > Tokens で発行したトークンを
+          # GitHub Secrets に RAILWAY_TOKEN として登録してください
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}

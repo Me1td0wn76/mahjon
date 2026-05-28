@@ -1,6 +1,10 @@
+// このファイルは「待機室画面」のコンポーネント。
+// ルーム作成後、他のプレイヤーが揃うまで待機する画面を担当。
+// 席0（=ホスト）の人だけ「ゲーム開始」ボタンが見える設計。
 import React from 'react';
 import './WaitingRoom.css';
 
+// 1プレイヤー分の最小情報
 interface Player {
   name: string;
   seat: number;
@@ -10,10 +14,11 @@ interface Props {
   roomName: string;
   maxPlayers: number;
   players: Player[];
-  mySeat: number;
+  mySeat: number;                                            // 自分の席（ホスト判定に使う）
   onStartGame: () => void;
 }
 
+// 席番号 → 風の漢字に対応する配列
 const SEAT_WINDS = ['東', '南', '西', '北'];
 
 export const WaitingRoom: React.FC<Props> = ({
@@ -23,6 +28,7 @@ export const WaitingRoom: React.FC<Props> = ({
   mySeat,
   onStartGame,
 }) => {
+  // 満席かどうかを計算
   const isFull = players.length >= maxPlayers;
 
   return (
@@ -32,7 +38,9 @@ export const WaitingRoom: React.FC<Props> = ({
         <p className="waiting-subtitle">{maxPlayers}人麻雀 — プレイヤーを待っています</p>
 
         <div className="player-slots">
+          {/* Array.from({length: N}) で長さNの空配列を作って map で席を描画 */}
           {Array.from({ length: maxPlayers }).map((_, i) => {
+            // この席番号のプレイヤーが存在するか探す
             const player = players.find(p => p.seat === i);
             return (
               <div key={i} className={`player-slot ${player ? 'occupied' : 'empty'}`}>
@@ -40,6 +48,7 @@ export const WaitingRoom: React.FC<Props> = ({
                 {player ? (
                   <span className="slot-name">
                     {player.name}
+                    {/* 自分の席なら「(あなた)」を付与 */}
                     {player.seat === mySeat && <span className="me-tag"> (あなた)</span>}
                   </span>
                 ) : (
@@ -60,6 +69,7 @@ export const WaitingRoom: React.FC<Props> = ({
           )}
         </div>
 
+        {/* === ホスト（席0）のみ表示するボタン === */}
         {mySeat === 0 && (
           <button
             className="btn-start"
@@ -70,6 +80,7 @@ export const WaitingRoom: React.FC<Props> = ({
           </button>
         )}
 
+        {/* ホスト以外には案内文を表示 */}
         {mySeat !== 0 && (
           <div className="waiting-host">部屋の作成者がゲームを開始するまでお待ちください</div>
         )}

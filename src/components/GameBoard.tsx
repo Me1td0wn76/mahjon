@@ -1,3 +1,11 @@
+// このファイルは麻雀の「対局画面」を描画する大きめのコンポーネント。
+// 自分・上家・対面・下家のそれぞれを画面の上下左右に配置し、
+// 中央のスコアボード、各人の捨て牌（河）、自分の手牌、アクションボタンを表示する。
+//
+// 重要なポイント:
+//   - 「席番号(seat)」は絶対位置（東=0, 南=1, ...）。
+//   - 一方「下家/対面/上家」は自分から見た相対位置で、ここで計算する。
+//   - GameBoard は表示と入力受付に専念し、ゲームロジックはサーバーに任せる。
 import React, { useState, useCallback } from 'react';
 import {
   type GameView,
@@ -14,8 +22,11 @@ import './GameBoard.css';
 
 /* ── helpers ───────────────────────────────────────────────────────────── */
 
+// 自分から見た相対位置の型。
+// self=自分、shimocha=下家(右)、toimen=対面(上)、kamicha=上家(左)
 type Position = 'self' | 'shimocha' | 'toimen' | 'kamicha';
 
+// 位置 → 表示用ラベルのマッピング
 const POSITION_LABEL: Record<Position, string> = {
   self: '自家',
   shimocha: '下家',
@@ -23,14 +34,17 @@ const POSITION_LABEL: Record<Position, string> = {
   kamicha: '上家',
 };
 
+// プレイヤーアバターの背景色（席番号で選ぶ）
 const AVATAR_COLORS = ['#c0556a', '#3f7cc0', '#4fa06a', '#b88a3a'];
 
+// プレイヤー数に応じた持ち点の起点（点差表示用）
 function startingScore(playerCount: number): number {
   return playerCount === 3 ? 35000 : 25000;
 }
 
 /* ── face-down opponent hand (wall of tile backs) ──────────────────────── */
 
+// 相手の手牌（裏向き）を、横向き(h) か 縦向き(v) で並べる小コンポーネント
 const FaceDownWall: React.FC<{ count: number; orientation: 'h' | 'v' }> = ({
   count,
   orientation,
@@ -44,6 +58,8 @@ const FaceDownWall: React.FC<{ count: number; orientation: 'h' | 'v' }> = ({
 
 /* ── river (discard pile) ──────────────────────────────────────────────── */
 
+// プレイヤーの「河（捨て牌の列）」を描画する
+// lastSeat が true のときは最後の捨て牌をハイライト表示
 const River: React.FC<{
   tiles: Tile[];
   orientation: 'h' | 'v';
@@ -63,6 +79,7 @@ const River: React.FC<{
 
 /* ── melds ─────────────────────────────────────────────────────────────── */
 
+// 鳴いた面子の表示行。melds が空なら何も描かない。
 const MeldRow: React.FC<{ melds: Meld[] }> = ({ melds }) => {
   if (!melds.length) return null;
   return (
@@ -80,12 +97,13 @@ const MeldRow: React.FC<{ melds: Meld[] }> = ({ melds }) => {
 
 /* ── player info panel (avatar + rank + position + name) ───────────────── */
 
+// プレイヤー情報パネル（顔・順位・点差・席風・名前）
 const PlayerPanel: React.FC<{
   player: PlayerView;
   position: Position;
   rank: number;
   delta: number;
-  active: boolean;
+  active: boolean;                                           // この席が現在の手番か
   color: string;
 }> = ({ player, position, rank, delta, active, color }) => (
   <div className={`player-panel pos-${position} ${active ? 'active' : ''}`}>
@@ -94,6 +112,7 @@ const PlayerPanel: React.FC<{
     </div>
     <div className="panel-info">
       <div className="panel-rank">
+        {/* delta/1000 |0 は「1000で割って小数切捨て」。ビット演算子 |0 は Math.floor の高速版 */}
         {rank}位 <span className="panel-delta">({delta >= 0 ? '+' : ''}{delta / 1000 | 0})</span>
       </div>
       <div className="panel-pos">{POSITION_LABEL[position]}</div>
@@ -107,6 +126,7 @@ const PlayerPanel: React.FC<{
 
 /* ── center scoreboard ─────────────────────────────────────────────────── */
 
+// 中央スコアボードの1セル（風＋点数）
 const ScoreCell: React.FC<{ wind: Wind; score: number; active: boolean }> = ({
   wind,
   score,
@@ -120,6 +140,7 @@ const ScoreCell: React.FC<{ wind: Wind; score: number; active: boolean }> = ({
 
 /* ── main GameBoard ─────────────────────────────────────────────────────── */
 
+// GameBoard 本体の props。親(App)から状態と操作関数を受け取る。
 interface Props {
   gameView: GameView;
   onDiscard: (tileId: string) => void;
@@ -128,9 +149,13 @@ interface Props {
 }
 
 export const GameBoard: React.FC<Props> = ({ gameView, onDiscard, onClaim, onTsumo }) => {
+  // 牌のクリック1回目で「選択中」にし、2回目で確定して捨てる。
+  // ダブルクリック誤爆防止と確認の役割を兼ねる UI。
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // チーの組み合わせが2つ以上ある時、選択UIを出す
   const [showChiSelect, setShowChiSelect] = useState(false);
 
+  // gameView の中身を分割代入で取り出す
   const {
     phase,
     currentTurn,
@@ -148,48 +173,61 @@ export const GameBoard: React.FC<Props> = ({ gameView, onDiscard, onClaim, onTsu
   } = gameView;
 
   const pc = players.length;
+  // 自分のプレイヤー情報。`!` は「絶対 undefined ではない」と教えるアサーション
   const me = players.find(p => p.seat === mySeat)!;
 
-  // Relative seat positions (turn order goes seat+1, seat+2, ...)
-  const rightSeat = (mySeat + 1) % pc; // 下家
-  const topSeat = pc === 4 ? (mySeat + 2) % pc : -1; // 対面
-  const leftSeat = (mySeat + (pc - 1)) % pc; // 上家
+  // 自分の席を基準に、相対位置の席番号を計算する
+  // 手番の進行順は seat+1, seat+2, ... なので
+  const rightSeat = (mySeat + 1) % pc;                       // 下家（次の手番の人）
+  const topSeat = pc === 4 ? (mySeat + 2) % pc : -1;         // 対面（3人麻雀では存在しない）
+  const leftSeat = (mySeat + (pc - 1)) % pc;                 // 上家（前の手番の人）
 
+  // 各位置のプレイヤー情報。topSeat=-1 のときは null。
   const rightPlayer = players.find(p => p.seat === rightSeat);
   const topPlayer = topSeat >= 0 ? players.find(p => p.seat === topSeat) : null;
   const leftPlayer = players.find(p => p.seat === leftSeat);
 
-  // Ranking & point delta
+  // 順位と起点との点差を計算
   const start = startingScore(pc);
+  // 点数の多い順に並べて、席番号の配列を作る
   const ranking = [...players].sort((a, b) => b.score - a.score).map(p => p.seat);
+  // 席 → 順位（1始まり）
   const rankOf = (seat: number) => ranking.indexOf(seat) + 1;
+  // 席 → 持ち点と初期点の差
   const deltaOf = (seat: number) => (players.find(p => p.seat === seat)!.score - start);
 
+  // よく使う判定をまとめておく
   const isMyTurn = currentTurn === mySeat && phase === 'discard';
+  // claiming フェーズ中で、自分に鳴ける選択肢がある時だけアクション欄を表示
   const isClaiming = phase === 'claiming' && !!availableClaims?.length;
+  // ツモ可能か（クライアント側の簡易判定。最終判定はサーバー）
   const canTsumo = isMyTurn && canTsumoCheck(myHand, me?.melds ?? []);
 
-  // Detect freshly drawn tile (separate it visually on my turn)
+  // 手牌が「面子の倍数+2」（=ツモった直後の14枚）の時、最後の1枚を見やすく離す
   const drawnSeparated = isMyTurn && myHand.length % 3 === 2;
 
+  // 牌をクリックした時の処理。1回目で選択、2回目で打牌確定。
+  // useCallback で関数を安定化（再レンダリングのたびに新しい関数を作らない）。
   const handleTileClick = useCallback(
     (tileId: string) => {
       if (!isMyTurn) return;
       if (selectedId === tileId) {
-        onDiscard(tileId);
+        onDiscard(tileId);                                   // 2回目 → 捨てる
         setSelectedId(null);
       } else {
-        setSelectedId(tileId);
+        setSelectedId(tileId);                               // 1回目 → 選択中
       }
     },
     [isMyTurn, selectedId, onDiscard]
   );
 
+  // チーの組み合わせを選んだ後の処理
   const handleChiSelect = (chiTiles: [string, string]) => {
     setShowChiSelect(false);
     onClaim('chi', chiTiles);
   };
 
+  // 相手プレイヤーの描画ヘルパ（裏向き手牌＋鳴いた面子）
   const renderOpponentArea = (
     player: PlayerView | null | undefined,
     position: Position,
@@ -206,7 +244,7 @@ export const GameBoard: React.FC<Props> = ({ gameView, onDiscard, onClaim, onTsu
 
   return (
     <div className={`game-board players-${pc}`}>
-      {/* ── top-left HUD: round + dora ── */}
+      {/* ── 画面左上のHUD: 局表示 + ドラ表示牌 ── */}
       <div className="hud">
         <div className="hud-dora">
           <span className="hud-dora-label">ドラ表示牌</span>
@@ -224,7 +262,7 @@ export const GameBoard: React.FC<Props> = ({ gameView, onDiscard, onClaim, onTsu
         </div>
       </div>
 
-      {/* ── player panels (corners) ── */}
+      {/* ── プレイヤーパネル（画面の四隅に配置） ── */}
       {leftPlayer && (
         <PlayerPanel
           player={leftPlayer}
@@ -266,9 +304,9 @@ export const GameBoard: React.FC<Props> = ({ gameView, onDiscard, onClaim, onTsu
         />
       )}
 
-      {/* ── table ── */}
+      {/* ── 卓全体（テーブル）の描画 ── */}
       <div className="table">
-        {/* opponent hands at edges */}
+        {/* 卓の縁(edge)に対戦相手の手牌(裏向き)＋鳴いた面子を配置 */}
         <div className="edge edge-top">
           {renderOpponentArea(topPlayer, 'toimen', 'h')}
         </div>
@@ -279,7 +317,7 @@ export const GameBoard: React.FC<Props> = ({ gameView, onDiscard, onClaim, onTsu
           {renderOpponentArea(rightPlayer, 'shimocha', 'v')}
         </div>
 
-        {/* center: rivers around scoreboard */}
+        {/* 卓の中央: 河（捨て牌）とスコアボード */}
         <div className="center">
           {topPlayer && (
             <div className="river-slot slot-top">
@@ -300,6 +338,7 @@ export const GameBoard: React.FC<Props> = ({ gameView, onDiscard, onClaim, onTsu
             </div>
           )}
 
+          {/* スコアボード（4方向の風と点数＋残り山牌数） */}
           <div className="scoreboard">
             {topPlayer && (
               <div className="sb-slot sb-top">
@@ -356,24 +395,27 @@ export const GameBoard: React.FC<Props> = ({ gameView, onDiscard, onClaim, onTsu
         </div>
       </div>
 
-      {/* ── my area: melds + hand + actions ── */}
+      {/* ── 画面下部: 自分の鳴き面子・手牌・アクション ── */}
       <div className="my-area">
         <MeldRow melds={me?.melds ?? []} />
 
         <div className="my-hand">
           {myHand.map((tile, i) => (
+            // React.Fragment は <></> と同じ。key を持たせたい時にこの長い形を使う。
             <React.Fragment key={tile.id}>
+              {/* ツモ牌だけ少し離して見せる視覚的工夫 */}
               {drawnSeparated && i === myHand.length - 1 && <span className="hand-gap" />}
               <TileComponent
                 tile={tile}
                 selected={selectedId === tile.id}
+                // 自分の番じゃない時は onClick を渡さない＝クリック不可
                 onClick={isMyTurn ? () => handleTileClick(tile.id) : undefined}
               />
             </React.Fragment>
           ))}
         </div>
 
-        {/* action panel */}
+        {/* ── アクションパネル: 状況に応じてボタンを切り替える ── */}
         <div className="action-panel">
           {isMyTurn && (
             <div className="action-row">
@@ -399,6 +441,7 @@ export const GameBoard: React.FC<Props> = ({ gameView, onDiscard, onClaim, onTsu
             </div>
           )}
 
+          {/* 鳴きフェーズで自分に選択肢がある時のボタン群 */}
           {isClaiming && !showChiSelect && (
             <div className="action-row claim-row">
               <span className="claim-label">アクションを選択:</span>
@@ -416,6 +459,7 @@ export const GameBoard: React.FC<Props> = ({ gameView, onDiscard, onClaim, onTsu
                 <button
                   className="btn-action chi"
                   onClick={() =>
+                    // チーの組み合わせが1通りなら即確定、複数あれば選択UIへ
                     chiCombinations && chiCombinations.length === 1
                       ? handleChiSelect(chiCombinations[0])
                       : setShowChiSelect(true)
@@ -430,6 +474,7 @@ export const GameBoard: React.FC<Props> = ({ gameView, onDiscard, onClaim, onTsu
             </div>
           )}
 
+          {/* チーの組み合わせ選択UI（候補が複数ある場合のみ） */}
           {isClaiming && showChiSelect && chiCombinations && lastDiscard && (
             <div className="chi-selector">
               <p className="chi-label">チーの組み合わせを選択</p>
@@ -437,6 +482,7 @@ export const GameBoard: React.FC<Props> = ({ gameView, onDiscard, onClaim, onTsu
                 const t1 = myHand.find(t => t.id === id1);
                 const t2 = myHand.find(t => t.id === id2);
                 if (!t1 || !t2) return null;
+                // 表示用に小さい順に並べる
                 const seq = [t1, t2, lastDiscard.tile].sort((a, b) => a.value - b.value);
                 return (
                   <button
