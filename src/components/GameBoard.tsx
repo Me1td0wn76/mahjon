@@ -64,14 +64,19 @@ const River: React.FC<{
   tiles: Tile[];
   orientation: 'h' | 'v';
   lastSeat?: boolean;
-}> = ({ tiles, orientation, lastSeat }) => (
-  <div className={`river river-${orientation}`}>
+  accent?: string;
+}> = ({ tiles, orientation, lastSeat, accent }) => (
+  <div
+    className={`river river-${orientation}`}
+    // プレイヤーごとの色マットにして「誰の河か」を一目で分かるようにする
+    style={accent ? { boxShadow: `inset 0 0 0 2px ${accent}88` } : undefined}
+  >
     {tiles.map((t, i) => (
       <TileComponent
         key={t.id}
         tile={t}
         small
-        selected={lastSeat && i === tiles.length - 1}
+        highlight={lastSeat && i === tiles.length - 1}
       />
     ))}
   </div>
@@ -107,26 +112,35 @@ const PlayerPanel: React.FC<{
   color: string;
 }> = ({ player, position, rank, delta, active, color }) => (
   <div className={`player-panel pos-${position} ${active ? 'active' : ''}`}>
-    <div className="avatar" style={{ background: color }}>
-      {player.name.slice(0, 1)}
-    </div>
-    <div className="panel-info">
-      <div className="panel-rank">
-        {/* delta/1000 |0 は「1000で割って小数切捨て」。ビット演算子 |0 は Math.floor の高速版 */}
-        {rank}位 <span className="panel-delta">({delta >= 0 ? '+' : ''}{delta / 1000 | 0})</span>
+    {/* アバター＋情報の行 */}
+    <div className="panel-main">
+      <div className="avatar" style={{ background: color }}>
+        {player.name.slice(0, 1)}
       </div>
-      <div className="panel-pos">{POSITION_LABEL[position]}</div>
-      <div className="panel-name">
-        {player.name}
-        {player.isDealer && <span className="dealer-tag">親</span>}
-        {/* リーチ中バッジ */}
-        {player.isRiichi && <span className="riichi-tag">立直</span>}
-        {/* 三麻の北抜き枚数表示 */}
-        {player.kitaCount > 0 && (
-          <span className="kita-tag">北×{player.kitaCount}</span>
-        )}
+      <div className="panel-info">
+        <div className="panel-rank">
+          {/* delta/1000 |0 は「1000で割って小数切捨て」。ビット演算子 |0 は Math.floor の高速版 */}
+          {rank}位 <span className="panel-delta">({delta >= 0 ? '+' : ''}{delta / 1000 | 0})</span>
+        </div>
+        <div className="panel-pos">{POSITION_LABEL[position]}</div>
+        <div className="panel-name">
+          {player.name}
+          {player.isDealer && <span className="dealer-tag">親</span>}
+          {/* リーチ中バッジ */}
+          {player.isRiichi && <span className="riichi-tag">立直</span>}
+          {/* 三麻の北抜き枚数表示 */}
+          {player.kitaCount > 0 && (
+            <span className="kita-tag">北×{player.kitaCount}</span>
+          )}
+        </div>
       </div>
     </div>
+    {/* 鳴いた面子は名前の下にまとめて表示する */}
+    {player.melds.length > 0 && (
+      <div className="panel-melds">
+        <MeldRow melds={player.melds} />
+      </div>
+    )}
   </div>
 );
 
@@ -272,8 +286,8 @@ export const GameBoard: React.FC<Props> = ({
     if (!player) return null;
     return (
       <div className={`opp-area opp-${position}`}>
+        {/* 相手の手牌（裏向き）。鳴いた面子は各プレイヤーパネルにまとめて表示する */}
         <FaceDownWall count={player.handCount} orientation={wallOrient} />
-        <MeldRow melds={player.melds} />
       </div>
     );
   };
@@ -365,6 +379,7 @@ export const GameBoard: React.FC<Props> = ({
                 tiles={topPlayer.discards}
                 orientation="h"
                 lastSeat={lastDiscard?.seat === topPlayer.seat}
+                accent={AVATAR_COLORS[topPlayer.seat % 4]}
               />
             </div>
           )}
@@ -374,6 +389,7 @@ export const GameBoard: React.FC<Props> = ({
                 tiles={leftPlayer.discards}
                 orientation="v"
                 lastSeat={lastDiscard?.seat === leftPlayer.seat}
+                accent={AVATAR_COLORS[leftPlayer.seat % 4]}
               />
             </div>
           )}
@@ -422,6 +438,7 @@ export const GameBoard: React.FC<Props> = ({
                 tiles={rightPlayer.discards}
                 orientation="v"
                 lastSeat={lastDiscard?.seat === rightPlayer.seat}
+                accent={AVATAR_COLORS[rightPlayer.seat % 4]}
               />
             </div>
           )}
@@ -430,15 +447,14 @@ export const GameBoard: React.FC<Props> = ({
               tiles={me.discards}
               orientation="h"
               lastSeat={lastDiscard?.seat === mySeat}
+              accent={AVATAR_COLORS[mySeat % 4]}
             />
           </div>
         </div>
       </div>
 
-      {/* ── 画面下部: 自分の鳴き面子・手牌・アクション ── */}
+      {/* ── 画面下部: 自分の手牌・アクション（鳴き面子は自分のパネルに表示） ── */}
       <div className="my-area">
-        <MeldRow melds={me?.melds ?? []} />
-
         <div className="my-hand">
           {myHand.map((tile, i) => (
             // React.Fragment は <></> と同じ。key を持たせたい時にこの長い形を使う。

@@ -14,6 +14,7 @@ interface Props {
   faceDown?: boolean;                                        // 裏向き（他人の手牌など）
   small?: boolean;                                           // 小サイズで表示
   dimmed?: boolean;                                          // 半透明で薄く表示
+  highlight?: boolean;                                       // 枠を光らせて強調（直近の捨て牌など）
 }
 
 /**
@@ -36,6 +37,7 @@ export const TileComponent: React.FC<Props> = ({
   faceDown,
   small,
   dimmed,
+  highlight,
 }) => {
   // 条件に応じたクラス名を配列で集めて、空文字を除いてスペースで結合。
   // CSSクラスを動的に組み立てる典型パターン。
@@ -46,6 +48,7 @@ export const TileComponent: React.FC<Props> = ({
     selected ? 'tile-selected' : '',
     small ? 'tile-small' : '',
     dimmed ? 'tile-dimmed' : '',
+    highlight ? 'tile-highlight' : '',
     onClick ? 'tile-clickable' : '',
   ]
     .filter(Boolean)                                         // 空文字や false を除外

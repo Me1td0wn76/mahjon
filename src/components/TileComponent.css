@@ -46,6 +46,17 @@
   opacity: 0.45;
 }
 
+/* 直近の捨て牌など、位置を動かさずに枠を光らせて強調する */
+.tile-highlight {
+  border-color: #f4c040;
+  background: linear-gradient(160deg, #fffbe6 0%, #f8e9a8 100%);
+  box-shadow:
+    0 0 0 2px #f4c040,
+    0 0 8px 1px rgba(244, 192, 64, 0.7),
+    2px 3px 5px rgba(0, 0, 0, 0.4);
+  z-index: 2;
+}
+
 .tile-face-down {
   background:
     repeating-linear-gradient(

@@ -117,7 +117,7 @@ export const WIND_LABEL: Record<Wind, string> = {
 // 字牌の表示文字。インデックス0が「東」、6が「中」。
 export const HONOR_NAMES = ['東', '南', '西', '北', '白', '発', '中'];
 // 種類 → 表示文字
-export const SUIT_CHARS: Record<string, string> = { man: '万', pin: '筒', sou: '索' };
+export const SUIT_CHARS: Record<string, string> = { man: '萬', pin: '筒', sou: '索' };
 
 /**
  * 1枚の牌を日本語ラベルに変換するヘルパ。UI 表示用。

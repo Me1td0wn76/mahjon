@@ -53,15 +53,21 @@ export const previewGameView: GameView = {
     t('honor', 1),
     t('honor', 3),
   ],
-  // 4人分のプレイヤー公開情報
+  // 4人分のプレイヤー公開情報（中盤らしい状態でレイアウトを確認できるようにしている）
   players: [
     {
       seat: 0,
       name: 'hoge',
-      handCount: 13,
-      discards: discards([['man', 1], ['pin', 9], ['sou', 1], ['honor', 5], ['man', 2], ['pin', 2]]),
-      melds: [],
-      score: 30000,
+      handCount: 10,
+      discards: discards([
+        ['man', 1], ['pin', 9], ['sou', 1], ['honor', 5], ['man', 2], ['pin', 2],
+        ['honor', 4], ['sou', 1], ['man', 9],
+      ]),
+      // ポン（中）を1つ持っている例
+      melds: [
+        { type: 'pon', tiles: [t('honor', 7), t('honor', 7), t('honor', 7)], fromSeat: 2 },
+      ],
+      score: 32000,
       isDealer: true,
       seatWind: 'east',
       isRiichi: false,
@@ -71,21 +77,28 @@ export const previewGameView: GameView = {
       seat: 1,
       name: 'huga',
       handCount: 13,
-      discards: discards([['sou', 9], ['man', 9], ['honor', 7], ['pin', 1]]),
+      discards: discards([
+        ['sou', 9], ['man', 9], ['honor', 7], ['pin', 1], ['honor', 1], ['sou', 8], ['pin', 6],
+      ]),
       melds: [],
-      score: 30000,
+      score: 24000,
       isDealer: false,
       seatWind: 'south',
-      isRiichi: false,
+      isRiichi: true,              // リーチ中（立直タグ＋河の色マットを確認）
       kitaCount: 0,
     },
     {
       seat: 2,
       name: 'fuga',
-      handCount: 13,
-      discards: discards([['honor', 2], ['man', 3], ['pin', 8], ['sou', 2], ['man', 5]]),
-      melds: [],
-      score: 30000,
+      handCount: 10,
+      discards: discards([
+        ['honor', 2], ['man', 3], ['pin', 8], ['sou', 2], ['man', 5], ['pin', 3], ['honor', 6],
+      ]),
+      // チー（4-5-6筒）の例
+      melds: [
+        { type: 'chi', tiles: [t('pin', 4), t('pin', 5), t('pin', 6)], fromSeat: 1 },
+      ],
+      score: 27000,
       isDealer: false,
       seatWind: 'west',
       isRiichi: false,
@@ -95,7 +108,9 @@ export const previewGameView: GameView = {
       seat: 3,
       name: 'piyo',
       handCount: 14,
-      discards: discards([['honor', 6], ['sou', 3], ['man', 1], ['pin', 7]]),
+      discards: discards([
+        ['honor', 6], ['sou', 3], ['man', 1], ['pin', 7], ['sou', 5], ['man', 6],
+      ]),
       melds: [],
       score: 30000,
       isDealer: false,
