@@ -123,12 +123,11 @@ export function checkWin(closedHand: Tile[], openMelds: Meld[], winTile: Tile): 
 }
 
 /**
- * テンパイ判定（あと1枚で和了できる状態か）。
- * すべての牌の種類を1枚ずつ「もしこの牌が来たら？」と試して、1つでも和了できれば true。
- * 流局時の罰符計算などで使います。
+ * 待ち牌（あと1枚で和了できる牌）の集合を `"suit_value"` の文字列キーで返す。
+ * すべての牌の種類を1枚ずつ「もしこの牌が来たら？」と試して、和了できる種類を集める。
  */
-export function isTenpai(closedHand: Tile[], openMelds: Meld[]): boolean {
-  // 試す牌のリストを作る（id は判定に使わないのでダミー）
+export function waitingTileKeys(closedHand: Tile[], openMelds: Meld[]): Set<string> {
+  const keys = new Set<string>();
   const testTiles: { suit: Tile['suit']; value: number }[] = [];
   for (const suit of ['man', 'pin', 'sou'] as const) {
     for (let v = 1; v <= 9; v++) testTiles.push({ suit, value: v });
@@ -137,10 +136,18 @@ export function isTenpai(closedHand: Tile[], openMelds: Meld[]): boolean {
 
   for (const tt of testTiles) {
     if (checkWin(closedHand, openMelds, { id: 'test', suit: tt.suit, value: tt.value }).isWin) {
-      return true;
+      keys.add(`${tt.suit}_${tt.value}`);
     }
   }
-  return false;
+  return keys;
+}
+
+/**
+ * テンパイ判定（あと1枚で和了できる状態か）。
+ * 流局時の罰符計算などで使います。
+ */
+export function isTenpai(closedHand: Tile[], openMelds: Meld[]): boolean {
+  return waitingTileKeys(closedHand, openMelds).size > 0;
 }
 
 /**

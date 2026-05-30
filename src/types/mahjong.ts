@@ -88,6 +88,7 @@ export interface RoundResult {
   melds?: Meld[];
   yakuList?: YakuInfo[];                                     // 成立役の一覧
   totalHan?: number;                                         // 合計飜
+  fu?: number;                                               // 符
   doraIndicators?: Tile[];                                   // ドラ表示牌
   uraDoraIndicators?: Tile[];                                // 裏ドラ表示牌（リーチ和了時のみ）
   scoreDelta: Record<number, number>;

@@ -65,7 +65,10 @@ export const RoundResultModal: React.FC<Props> = ({ result, players, mySeat, onR
             {result.yakuList && result.yakuList.length > 0 && (
               <div className="result-yaku">
                 <h3 className="yaku-title">
-                  役 <span className="yaku-total">{result.totalHan ?? 0}飜</span>
+                  役{' '}
+                  <span className="yaku-total">
+                    {result.totalHan ?? 0}飜{result.fu ? ` ${result.fu}符` : ''}
+                  </span>
                 </h3>
                 <ul className="yaku-list">
                   {result.yakuList.map((y, i) => (

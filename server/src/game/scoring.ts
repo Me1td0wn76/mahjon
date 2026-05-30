@@ -14,6 +14,7 @@ export interface Yaku {
 export interface ScoringResult {
   yakuList: Yaku[];
   totalHan: number;
+  fu: number;              // 符（七対子は25符固定、平和は20/30符）
   basePoint: number;       // ベース支払い額（親なら×6、子ロン×4、子ツモ親×2子×1）
 }
 
@@ -22,6 +23,7 @@ export interface ScoreOptions {
   isIppatsu?: boolean;            // 一発（リーチ後1巡以内・鳴き無しで和了）
   isDoubleRiichi?: boolean;       // ダブル立直（第1打でのリーチ）
   isRinshan?: boolean;            // 嶺上開花（カンの補充ツモで和了）
+  isChankan?: boolean;            // 槍槓（他家の加槓を横取りロン）
   doraIndicators?: Tile[];        // ドラ表示牌
   uraDoraIndicators?: Tile[];     // 裏ドラ表示牌（リーチ和了時のみ参照）
 }
@@ -171,6 +173,109 @@ function isYakuhai(tile: Tile, seatWind: Wind, roundWind: Wind): boolean {
   return w === seatWind || w === roundWind;
 }
 
+// ====== 符計算のためのヘルパー ======
+
+/**
+ * 和了牌が順子のどこに入ったかを見て「両面待ち」かどうかを判定する。
+ * 両面でなければ嵌張（中）か辺張（端）。平和成立や待ち符の判定に使う。
+ */
+function isRyanmenWait(seqTiles: Tile[], winTile: Tile): boolean {
+  const [a, b, c] = seqTiles.map(t => t.value).sort((x, y) => x - y);
+  if (winTile.value === b) return false;            // 嵌張（中央待ち）
+  if (winTile.value === c && a === 1) return false; // 123 の辺張（3待ち）
+  if (winTile.value === a && c === 9) return false; // 789 の辺張（7待ち）
+  return true;                                       // 両面
+}
+
+/** 雀頭の符（役牌の雀頭は2符、ダブル風は4符）。 */
+function pairFu(tile: Tile, seatWind: Wind, roundWind: Wind): number {
+  if (tile.suit !== 'honor') return 0;
+  if (tile.value >= 5) return 2;                     // 三元牌
+  const winds: Wind[] = ['east', 'south', 'west', 'north'];
+  const w = winds[tile.value - 1];
+  let fu = 0;
+  if (w === seatWind) fu += 2;
+  if (w === roundWind) fu += 2;                      // 自風かつ場風（連風牌）なら4符
+  return fu;
+}
+
+/** 刻子・槓子の符。open=明刻/明槓, kan=槓子。 */
+function tripletFu(tile: Tile, open: boolean, kan: boolean): number {
+  const terminal = isYaochuhai(tile);
+  if (kan) return open ? (terminal ? 16 : 8) : (terminal ? 32 : 16);
+  return open ? (terminal ? 4 : 2) : (terminal ? 8 : 4);
+}
+
+/**
+ * 1つの和了形（雀頭＋面子の分解）に対する符を計算する。
+ * 平和は20符（ツモ）/30符（ロン）で固定。七対子は呼び出し側で25符固定。
+ */
+function computeFu(
+  decomp: MeldDecomp[],
+  openMelds: Meld[],
+  winTile: Tile,
+  isTsumo: boolean,
+  isClosed: boolean,
+  isPinfu: boolean,
+  seatWind: Wind,
+  roundWind: Wind
+): number {
+  if (isPinfu) return isTsumo ? 20 : 30;
+
+  let fu = 20;                                       // 副底
+  if (isTsumo) fu += 2;                              // ツモ符
+  else if (isClosed) fu += 10;                       // 門前加符（門前ロン）
+
+  // 雀頭
+  const pair = decomp.find(m => m.type === 'pair');
+  if (pair) fu += pairFu(pair.tiles[0], seatWind, roundWind);
+
+  // 手の内の刻子は一旦すべて暗刻として加算
+  for (const m of decomp) {
+    if (m.type === 'triplet') fu += tripletFu(m.tiles[0], false, false);
+  }
+  // 鳴いた面子（チーは0符）
+  for (const m of openMelds) {
+    if (m.type === 'pon') fu += tripletFu(m.tiles[0], true, false);
+    else if (m.type === 'minkan') fu += tripletFu(m.tiles[0], true, true);
+    else if (m.type === 'ankan') fu += tripletFu(m.tiles[0], false, true);
+  }
+
+  // 待ち符＋ロン時の刻子の明刻化。和了牌が属し得るグループごとに評価し、最大を採用（高点法）。
+  let bestExtra = 0;
+  for (const g of decomp) {
+    if (!g.tiles.some(t => tilesEqual(t, winTile))) continue;
+    let extra = 0;
+    if (g.type === 'pair') {
+      extra = 2;                                     // 単騎待ち
+    } else if (g.type === 'sequence') {
+      extra = isRyanmenWait(g.tiles, winTile) ? 0 : 2;  // 嵌張・辺張は2符
+    } else if (g.type === 'triplet' && !isTsumo) {
+      // シャンポンのロンは明刻扱い（暗刻として加えた分との差を戻す＝マイナス）
+      extra = tripletFu(g.tiles[0], true, false) - tripletFu(g.tiles[0], false, false);
+    }
+    if (extra > bestExtra) bestExtra = extra;
+  }
+  fu += bestExtra;
+
+  return Math.ceil(fu / 10) * 10;                    // 10符単位で切り上げ
+}
+
+/**
+ * 符と飜から基本点を求める。基本点 = 符 × 2^(2+飜)。
+ * 満貫(2000)で頭打ちし、5飜以上は固定テーブル。
+ */
+function fuHanToBasePoint(fu: number, han: number): number {
+  if (han <= 0) return 0;
+  if (han >= 13) return 8000;          // 役満
+  if (han >= 11) return 6000;          // 三倍満
+  if (han >= 8) return 4000;           // 倍満
+  if (han >= 6) return 3000;           // 跳満
+  if (han >= 5) return 2000;           // 満貫
+  const base = fu * Math.pow(2, 2 + han);
+  return Math.min(base, 2000);         // 4飜以下でも2000を超えたら満貫
+}
+
 /**
  * 与えられた1つの分解パターンに対して役を判定し、飜の合計を返す。
  */
@@ -184,7 +289,9 @@ function evaluateDecomp(
   allTiles: Tile[],
   isIppatsu: boolean,
   isDoubleRiichi: boolean,
-  isRinshan: boolean
+  isRinshan: boolean,
+  isChankan: boolean,
+  winTile: Tile
 ): Yaku[] {
   const yaku: Yaku[] = [];
   // 暗槓は門前を崩さない。チー・ポン・明槓があるときだけ「非門前」とする。
@@ -207,6 +314,8 @@ function evaluateDecomp(
   if (isIppatsu) yaku.push({ name: '一発', han: 1 });
   // 嶺上開花（カンの補充ツモで和了）
   if (isRinshan) yaku.push({ name: '嶺上開花', han: 1 });
+  // 槍槓（他家の加槓を横取り）
+  if (isChankan) yaku.push({ name: '槍槓', han: 1 });
   // 門前清自摸和
   if (isClosed && isTsumo) yaku.push({ name: '門前清自摸和', han: 1 });
 
@@ -235,14 +344,18 @@ function evaluateDecomp(
     yaku.push({ name: '断么九', han: 1 });
   }
 
-  // 平和（門前・全順子・雀頭が役牌でない・ツモは含めずシンプル）
+  // 平和（門前・全順子・雀頭が役牌でない・両面待ち）
   if (isClosed) {
     const seqs = decomp.filter(m => m.type === 'sequence');
     const trips = decomp.filter(m => m.type === 'triplet');
     const pair = decomp.find(m => m.type === 'pair');
     if (seqs.length === 4 && trips.length === 0 && pair) {
       const head = pair.tiles[0];
-      if (!isYakuhai(head, seatWind, roundWind)) {
+      // 和了牌が順子の両面待ちで入っていること（嵌張・辺張・単騎は平和にならない）
+      const ryanmen = seqs.some(
+        s => s.tiles.some(t => tilesEqual(t, winTile)) && isRyanmenWait(s.tiles, winTile)
+      );
+      if (!isYakuhai(head, seatWind, roundWind) && ryanmen) {
         yaku.push({ name: '平和', han: 1 });
       }
     }
@@ -312,98 +425,68 @@ export function calculateScore(
   kitaCount: number,
   opts: ScoreOptions = {}
 ): ScoringResult {
-  const { isIppatsu = false, isDoubleRiichi = false, isRinshan = false } = opts;
+  const {
+    isIppatsu = false,
+    isDoubleRiichi = false,
+    isRinshan = false,
+    isChankan = false,
+  } = opts;
   const fullClosed = [...hand, winTile];
-  let bestYaku: Yaku[] = [];
-  let bestHan = 0;
+  const isClosed = openMelds.every(m => m.type === 'ankan');
 
-  // 七対子チェック
+  // ドラ・裏ドラ・北抜きの飜（分解の仕方に依存しない＝一度だけ計算）。
+  // ただしこれ自体は役ではないので、本来の役がある時だけ後で加算する。
+  const allFinalTiles = [...fullClosed, ...openMelds.flatMap(m => m.tiles)];
+  const doraHan = countDora(allFinalTiles, opts.doraIndicators ?? []);
+  const uraHan = isRiichi ? countDora(allFinalTiles, opts.uraDoraIndicators ?? []) : 0;
+
+  // 候補の中から「点数（基本点）が最大」になる組み合わせを採用する（高点法）。
+  interface Candidate { yakuList: Yaku[]; han: number; fu: number; basePoint: number }
+  let best: Candidate | null = null;
+
+  const consider = (yakuList: Yaku[], fu: number) => {
+    const yakuHan = yakuList.reduce((s, y) => s + y.han, 0);
+    if (yakuHan <= 0) return;                         // 役が無ければ和了不可
+    const finalYaku = [...yakuList];
+    let han = yakuHan;
+    if (kitaCount > 0) { finalYaku.push({ name: `抜きドラ(北×${kitaCount})`, han: kitaCount }); han += kitaCount; }
+    if (doraHan > 0) { finalYaku.push({ name: 'ドラ', han: doraHan }); han += doraHan; }
+    if (uraHan > 0) { finalYaku.push({ name: '裏ドラ', han: uraHan }); han += uraHan; }
+    const basePoint = fuHanToBasePoint(fu, han);
+    const current: Candidate | null = best;
+    if (!current || basePoint > current.basePoint || (basePoint === current.basePoint && han > current.han)) {
+      best = { yakuList: finalYaku, han, fu, basePoint };
+    }
+  };
+
+  // 七対子（25符固定）
   if (openMelds.length === 0 && isChiitoitsu(fullClosed)) {
     const yaku: Yaku[] = [{ name: '七対子', han: 2 }];
     if (isDoubleRiichi) yaku.push({ name: 'ダブル立直', han: 2 });
     else if (isRiichi) yaku.push({ name: '立直', han: 1 });
     if (isIppatsu) yaku.push({ name: '一発', han: 1 });
+    if (isChankan) yaku.push({ name: '槍槓', han: 1 });
     if (isTsumo) yaku.push({ name: '門前清自摸和', han: 1 });
-    // タンヤオも七対子と複合可
     if (fullClosed.every(t => t.suit !== 'honor' && t.value >= 2 && t.value <= 8)) {
       yaku.push({ name: '断么九', han: 1 });
     }
-    bestYaku = yaku;
-    bestHan = yaku.reduce((s, y) => s + y.han, 0);
+    consider(yaku, 25);
   }
 
-  // 通常形
-  const decomps = decompose(fullClosed);
-  for (const dc of decomps) {
+  // 通常形（4面子1雀頭）。各分解について役と符を求め、最高点を採用する。
+  for (const dc of decompose(fullClosed)) {
     const yaku = evaluateDecomp(
-      dc,
-      openMelds,
-      isTsumo,
-      isRiichi,
-      seatWind,
-      roundWind,
-      [...fullClosed, ...openMelds.flatMap(m => m.tiles)],
-      isIppatsu,
-      isDoubleRiichi,
-      isRinshan
+      dc, openMelds, isTsumo, isRiichi, seatWind, roundWind,
+      allFinalTiles, isIppatsu, isDoubleRiichi, isRinshan, isChankan, winTile
     );
-    const han = yaku.reduce((s, y) => s + y.han, 0);
-    if (han > bestHan) {
-      bestHan = han;
-      bestYaku = yaku;
-    }
+    const isPinfu = yaku.some(y => y.name === '平和');
+    const fu = computeFu(dc, openMelds, winTile, isTsumo, isClosed, isPinfu, seatWind, roundWind);
+    consider(yaku, fu);
   }
 
-  // ここまでで成立した「本来の役」が1つでもあるか。
-  // ドラ・裏ドラ・北抜きドラはそれ自体では和了役にならないため、
-  // 役が無い手にドラだけ乗せて和了扱いにしないようゲートする。
-  const hasYaku = bestHan > 0;
-
-  // 北抜きドラ（三麻専用）
-  if (hasYaku && kitaCount > 0) {
-    bestYaku.push({ name: `抜きドラ(北×${kitaCount})`, han: kitaCount });
-    bestHan += kitaCount;
-  }
-
-  // ドラ・裏ドラ（役が成立している時のみ加算）
-  if (hasYaku) {
-    const allFinalTiles = [...fullClosed, ...openMelds.flatMap(m => m.tiles)];
-    const doraCount = countDora(allFinalTiles, opts.doraIndicators ?? []);
-    if (doraCount > 0) {
-      bestYaku.push({ name: 'ドラ', han: doraCount });
-      bestHan += doraCount;
-    }
-    // 裏ドラはリーチ和了時のみ
-    if (isRiichi) {
-      const uraCount = countDora(allFinalTiles, opts.uraDoraIndicators ?? []);
-      if (uraCount > 0) {
-        bestYaku.push({ name: '裏ドラ', han: uraCount });
-        bestHan += uraCount;
-      }
-    }
-  }
-
-  // 飜数から基本点を決定（簡易テーブル）
-  // 役なしの場合は和了不可だが、ここでは0飜として返す（呼び出し側で判定）
-  const basePoint = hanToBasePoint(bestHan);
-  return { yakuList: bestYaku, totalHan: bestHan, basePoint };
-}
-
-/**
- * 飜数を基本点に変換する簡易テーブル。
- * 通常は30符基準。ここでは符を固定して飜だけ見ます。
- */
-function hanToBasePoint(han: number): number {
-  if (han <= 0) return 0;
-  if (han === 1) return 400;
-  if (han === 2) return 700;
-  if (han === 3) return 1300;
-  if (han === 4) return 2000;
-  if (han === 5) return 2000;          // 満貫
-  if (han <= 7) return 3000;           // 跳満
-  if (han <= 10) return 4000;          // 倍満
-  if (han <= 12) return 6000;          // 三倍満
-  return 8000;                         // 役満
+  const result = best as Candidate | null;
+  if (!result) return { yakuList: [], totalHan: 0, fu: 0, basePoint: 0 };
+  return { yakuList: result.yakuList, totalHan: result.han, fu: result.fu, basePoint: result.basePoint };
 }
 
 /**
