@@ -12,6 +12,18 @@ interface Props {
   onReady: () => void;                                       // 「次の局へ」のコールバック
 }
 
+// 飜数の表示ラベル。役満（13の倍数）は「役満／ダブル役満…」と表記する。
+function hanLabel(han: number): string {
+  if (han >= 13 && han % 13 === 0) {
+    const mult = han / 13;
+    if (mult === 1) return '役満';
+    if (mult === 2) return 'ダブル役満';
+    if (mult === 3) return 'トリプル役満';
+    return `${mult}倍役満`;
+  }
+  return `${han}飜`;
+}
+
 export const RoundResultModal: React.FC<Props> = ({ result, players, mySeat, onReady }) => {
   // 勝者の情報を取り出す。result.winner は席番号（undefined なら流局）。
   const winner = result.winner !== undefined ? players.find(p => p.seat === result.winner) : null;
@@ -67,14 +79,15 @@ export const RoundResultModal: React.FC<Props> = ({ result, players, mySeat, onR
                 <h3 className="yaku-title">
                   役{' '}
                   <span className="yaku-total">
-                    {result.totalHan ?? 0}飜{result.fu ? ` ${result.fu}符` : ''}
+                    {hanLabel(result.totalHan ?? 0)}
+                    {result.fu ? ` ${result.fu}符` : ''}
                   </span>
                 </h3>
                 <ul className="yaku-list">
                   {result.yakuList.map((y, i) => (
                     <li key={i} className="yaku-item">
                       <span className="yaku-name">{y.name}</span>
-                      <span className="yaku-han">{y.han}飜</span>
+                      <span className="yaku-han">{hanLabel(y.han)}</span>
                     </li>
                   ))}
                 </ul>

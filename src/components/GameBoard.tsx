@@ -15,6 +15,7 @@ import {
   type Wind,
   getTileName,
   canTsumoCheck,
+  getWaitingTiles,
   WIND_LABEL,
 } from '../types/mahjong';
 import { TileComponent } from './TileComponent';
@@ -99,6 +100,47 @@ const MeldRow: React.FC<{ melds: Meld[] }> = ({ melds }) => {
     </div>
   );
 };
+
+/* ── wait helper (beginner aid: shows winning tiles on hover) ──────────── */
+
+// Bootstrap Icons の question-circle（https://icons.getbootstrap.jp/icons/question-circle/）
+const QuestionCircleIcon: React.FC = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="18"
+    height="18"
+    fill="currentColor"
+    viewBox="0 0 16 16"
+    aria-hidden="true"
+  >
+    <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16" />
+    <path d="M5.255 5.786a.237.237 0 0 0 .241.247h.825c.138 0 .248-.113.266-.25.09-.656.54-1.134 1.342-1.134.686 0 1.314.343 1.314 1.168 0 .635-.374.927-.965 1.371-.673.489-1.206 1.06-1.168 1.987l.003.217a.25.25 0 0 0 .25.246h.811a.25.25 0 0 0 .25-.25v-.105c0-.718.273-.927 1.01-1.486.609-.463 1.244-.977 1.244-2.056 0-1.511-1.276-2.241-2.673-2.241-1.267 0-2.655.59-2.755 2.286zm1.557 5.763c0 .533.425.927 1.01.927.609 0 1.028-.394 1.028-.927 0-.552-.42-.94-1.029-.94-.584 0-1.009.388-1.009.94z" />
+  </svg>
+);
+
+// 待ち牌（アガリ牌）をホバーで表示する初心者向けヘルパー。
+// 待ちが無いときは状況に応じた案内文（note）を表示する。
+const WaitHelp: React.FC<{ waits: Tile[]; note: string }> = ({ waits, note }) => (
+  <div className="wait-help">
+    <button type="button" className="wait-help-btn" aria-label="待ち牌（アガリ牌）を表示">
+      <QuestionCircleIcon />
+    </button>
+    <div className="wait-tooltip" role="tooltip">
+      {waits.length > 0 ? (
+        <>
+          <div className="wait-tooltip-title">待ち（アガリ牌）</div>
+          <div className="wait-tiles">
+            {waits.map(t => (
+              <TileComponent key={t.id} tile={t} small />
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="wait-tooltip-note">{note}</div>
+      )}
+    </div>
+  </div>
+);
 
 /* ── player info panel (avatar + rank + position + name) ───────────────── */
 
@@ -248,6 +290,22 @@ export const GameBoard: React.FC<Props> = ({
 
   // 手牌が「面子の倍数+2」（=ツモった直後の14枚）の時、最後の1枚を見やすく離す
   const drawnSeparated = isMyTurn && myHand.length % 3 === 2;
+
+  // 待ち牌（アガリ牌）の計算。
+  // 自分の手番で牌を選んでいる時は「その牌を切った後の待ち」を、
+  // それ以外（13枚の待ち形）は現在の待ちを表示する。
+  const handForWait =
+    isMyTurn && selectedId ? myHand.filter(t => t.id !== selectedId) : myHand;
+  const waitingTiles = getWaitingTiles(handForWait, me?.melds ?? []);
+  // 待ちが無いときの案内文（状況で出し分け）
+  let waitNote = '';
+  if (waitingTiles.length === 0) {
+    if (isMyTurn && selectedId) waitNote = 'この牌を切るとテンパイになりません';
+    else if (isMyTurn) waitNote = '捨てる牌を選ぶと、その時の待ち牌を表示します';
+    else waitNote = 'テンパイしていません（ノーテン）';
+  }
+  // ヘルパーアイコンを出すか（テンパイ時、または自分の手番で案内を出したい時）
+  const showWaitHelp = waitingTiles.length > 0 || isMyTurn;
 
   // 牌をクリックした時の処理。1回目で選択、2回目で打牌確定。
   // リーチモード中ならクリックでリーチ宣言＋その牌の打牌。
@@ -469,6 +527,8 @@ export const GameBoard: React.FC<Props> = ({
               />
             </React.Fragment>
           ))}
+          {/* 手牌の右に「待ち牌」ヘルパー（？アイコン、ホバーでアガリ牌を表示） */}
+          {showWaitHelp && <WaitHelp waits={waitingTiles} note={waitNote} />}
         </div>
 
         {/* ── アクションパネル: 状況に応じてボタンを切り替える ── */}

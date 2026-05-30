@@ -371,6 +371,90 @@
   display: inline-block;
 }
 
+/* ── 待ち牌ヘルパー（？アイコン＋ホバーのツールチップ） ──────────────── */
+.wait-help {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+}
+
+.wait-help-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(244, 224, 122, 0.18);
+  color: #f4e07a;
+  cursor: help;
+  transition: background 0.15s, transform 0.15s;
+}
+
+.wait-help-btn:hover {
+  background: rgba(244, 224, 122, 0.35);
+  transform: scale(1.1);
+}
+
+/* ツールチップ本体（通常は非表示、ホバー/フォーカスで表示） */
+.wait-tooltip {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  z-index: 50;
+  min-width: 120px;
+  max-width: 320px;
+  padding: 8px 10px;
+  background: rgba(12, 22, 16, 0.97);
+  border: 1px solid rgba(244, 224, 122, 0.5);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+}
+
+.wait-help:hover .wait-tooltip,
+.wait-help:focus-within .wait-tooltip {
+  display: block;
+}
+
+/* 吹き出しの三角（下向き） */
+.wait-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 7px solid transparent;
+  border-top-color: rgba(12, 22, 16, 0.97);
+}
+
+.wait-tooltip-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #f4e07a;
+  margin-bottom: 6px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.wait-tiles {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.wait-tooltip-note {
+  font-size: 0.74rem;
+  color: #cdd;
+  line-height: 1.4;
+  text-align: center;
+}
+
 /* ── Meld groups ────────────────────────────────────────────────────────── */
 .meld-row {
   display: flex;

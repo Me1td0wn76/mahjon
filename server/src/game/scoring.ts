@@ -173,6 +173,190 @@ function isYakuhai(tile: Tile, seatWind: Wind, roundWind: Wind): boolean {
   return w === seatWind || w === roundWind;
 }
 
+/** 牌を `"suit_value"` のキー文字列にする。 */
+function tileKey(t: Tile): string {
+  return `${t.suit}_${t.value}`;
+}
+
+/** 三元牌（白5・發6・中7）か */
+function isDragon(t: Tile): boolean {
+  return t.suit === 'honor' && t.value >= 5;
+}
+
+/** 風牌（東1・南2・西3・北4）か */
+function isWindTile(t: Tile): boolean {
+  return t.suit === 'honor' && t.value <= 4;
+}
+
+/** 緑一色を構成できる牌（索子の2・3・4・6・8 と 發）か */
+function isGreenTile(t: Tile): boolean {
+  if (t.suit === 'sou') return [2, 3, 4, 6, 8].includes(t.value);
+  return t.suit === 'honor' && t.value === 6;        // 發
+}
+
+// ====== 役満判定 ======
+
+/** 国士無双（13種の么九牌＋いずれか1種の重複）か。鳴き無し前提。 */
+function isKokushi(tiles14: Tile[]): boolean {
+  if (tiles14.length !== 14) return false;
+  if (!tiles14.every(isYaochuhai)) return false;
+  return new Set(tiles14.map(tileKey)).size === 13;  // 13種そろい1種だけ重複
+}
+
+/** 九蓮宝燈の判定（純正＝あがり牌を除く13枚が 1112345678999 の形）。鳴き無し前提。 */
+function checkChuuren(tiles14: Tile[], hand13: Tile[]): { win: boolean; pure: boolean } {
+  const suits = new Set(tiles14.map(t => t.suit));
+  if (suits.size !== 1 || tiles14[0].suit === 'honor') return { win: false, pure: false };
+  const count = (arr: Tile[]) => {
+    const c = new Array(10).fill(0);
+    for (const t of arr) c[t.value]++;
+    return c;
+  };
+  const c = count(tiles14);
+  if (c[1] < 3 || c[9] < 3) return { win: false, pure: false };
+  for (let v = 2; v <= 8; v++) if (c[v] < 1) return { win: false, pure: false };
+  // 1112345678999 + 任意の1枚 は必ず和了形になるので、上の条件で九蓮形が確定する。
+  const h = count(hand13);
+  let pure = h[1] === 3 && h[9] === 3;
+  for (let v = 2; v <= 8 && pure; v++) if (h[v] !== 1) pure = false;
+  return { win: true, pure };
+}
+
+// 役満判定や刻子系の役判定で使う、和了形の各グループ（鳴き含む）を表す型。
+interface Group {
+  type: 'sequence' | 'triplet' | 'pair' | 'kan';
+  tiles: Tile[];
+  concealed: boolean;           // 暗（門前で手の内）かどうか。ロンで完成した刻子は明扱い。
+}
+
+/** 1つの分解と鳴き面子から、和了形の全グループ（暗/明の情報付き）を作る。 */
+function buildGroups(
+  decomp: MeldDecomp[],
+  openMelds: Meld[],
+  winTile: Tile,
+  isTsumo: boolean
+): Group[] {
+  const groups: Group[] = [];
+  for (const m of decomp) {
+    if (m.type === 'triplet') {
+      // ロンで和了牌がこの刻子を完成させた場合は明刻扱い（暗刻に数えない）
+      const completedByRon = !isTsumo && m.tiles.some(t => tilesEqual(t, winTile));
+      groups.push({ type: 'triplet', tiles: m.tiles, concealed: !completedByRon });
+    } else {
+      groups.push({ type: m.type, tiles: m.tiles, concealed: true });
+    }
+  }
+  for (const m of openMelds) {
+    if (m.type === 'chi') groups.push({ type: 'sequence', tiles: m.tiles, concealed: false });
+    else if (m.type === 'pon') groups.push({ type: 'triplet', tiles: m.tiles, concealed: false });
+    else if (m.type === 'minkan') groups.push({ type: 'kan', tiles: m.tiles, concealed: false });
+    else if (m.type === 'ankan') groups.push({ type: 'kan', tiles: m.tiles, concealed: true });
+  }
+  return groups;
+}
+
+/** 刻子・槓子の構造から成立する役満を判定する（大三元・四喜・四暗刻・四槓子）。 */
+function tripletYakuman(groups: Group[], closedNoOpen: boolean, winTile: Tile): Yaku[] {
+  const out: Yaku[] = [];
+  const trips = groups.filter(g => g.type === 'triplet' || g.type === 'kan');
+  const pair = groups.find(g => g.type === 'pair');
+
+  // 大三元（三元牌の刻子3種）
+  if (trips.filter(g => isDragon(g.tiles[0])).length === 3) {
+    out.push({ name: '大三元', han: 1 });
+  }
+  // 大四喜 / 小四喜
+  const windTrips = trips.filter(g => isWindTile(g.tiles[0])).length;
+  const pairIsWind = !!pair && isWindTile(pair.tiles[0]);
+  if (windTrips === 4) out.push({ name: '大四喜', han: 2 });
+  else if (windTrips === 3 && pairIsWind) out.push({ name: '小四喜', han: 1 });
+
+  // 四暗刻（門前で暗刻・暗槓が4つ）。単騎待ちはダブル役満。
+  if (closedNoOpen && trips.filter(g => g.concealed).length === 4) {
+    const tanki = !!pair && pair.tiles.some(t => tilesEqual(t, winTile));
+    out.push({ name: tanki ? '四暗刻単騎' : '四暗刻', han: tanki ? 2 : 1 });
+  }
+  // 四槓子（槓子4つ）
+  if (groups.filter(g => g.type === 'kan').length === 4) {
+    out.push({ name: '四槓子', han: 1 });
+  }
+  return out;
+}
+
+/**
+ * 役満を検出する。成立した役満（han フィールドに役満の倍数 1=単/2=ダブル）の一覧を返す。
+ * 1つでも返れば、通常役・ドラは無視して役満として精算する。
+ */
+function detectYakuman(
+  hand13: Tile[],
+  fullClosed: Tile[],
+  openMelds: Meld[],
+  winTile: Tile,
+  isTsumo: boolean
+): Yaku[] {
+  const allTiles = [...fullClosed, ...openMelds.flatMap(m => m.tiles)];
+  const noMelds = openMelds.length === 0;
+  const closedNoOpen = openMelds.every(m => m.type === 'ankan');
+  const result: Yaku[] = [];
+
+  // 国士無双（鳴き無し限定。他の役満とは複合しない）
+  if (noMelds && isKokushi(fullClosed)) {
+    const thirteen = new Set(hand13.map(tileKey)).size === 13;
+    return [{ name: thirteen ? '国士無双十三面' : '国士無双', han: thirteen ? 2 : 1 }];
+  }
+  // 九蓮宝燈（鳴き無し限定。他とは複合しない）
+  if (noMelds) {
+    const ch = checkChuuren(fullClosed, hand13);
+    if (ch.win) return [{ name: ch.pure ? '純正九蓮宝燈' : '九蓮宝燈', han: ch.pure ? 2 : 1 }];
+  }
+
+  // 牌の集合だけで決まる役満
+  if (allTiles.every(t => t.suit === 'honor')) result.push({ name: '字一色', han: 1 });
+  if (allTiles.every(isGreenTile)) result.push({ name: '緑一色', han: 1 });
+  if (allTiles.every(t => t.suit !== 'honor' && (t.value === 1 || t.value === 9))) {
+    result.push({ name: '清老頭', han: 1 });
+  }
+
+  // 刻子構造で決まる役満（分解を総当たりして最大倍数を採用）
+  let bestTrip: Yaku[] = [];
+  let bestMult = 0;
+  for (const dc of decompose(fullClosed)) {
+    const groups = buildGroups(dc, openMelds, winTile, isTsumo);
+    const y = tripletYakuman(groups, closedNoOpen, winTile);
+    const mult = y.reduce((s, a) => s + a.han, 0);
+    if (mult > bestMult) { bestMult = mult; bestTrip = y; }
+  }
+  result.push(...bestTrip);
+
+  return result;
+}
+
+// ====== 高度な通常役のためのヘルパー ======
+
+/** 数牌の種類（man/pin/sou）の集合を返す。 */
+function numberSuitsOf(tiles: Tile[]): Set<Suit> {
+  const s = new Set<Suit>();
+  for (const t of tiles) if (t.suit !== 'honor') s.add(t.suit);
+  return s;
+}
+
+/** decomp 内の暗刻（ロン完成刻子を除く）＋暗槓の数を数える。 */
+function countConcealedTriplets(
+  decomp: MeldDecomp[],
+  openMelds: Meld[],
+  winTile: Tile,
+  isTsumo: boolean
+): number {
+  let count = 0;
+  for (const m of decomp) {
+    if (m.type !== 'triplet') continue;
+    const completedByRon = !isTsumo && m.tiles.some(t => tilesEqual(t, winTile));
+    if (!completedByRon) count++;
+  }
+  for (const m of openMelds) if (m.type === 'ankan') count++;
+  return count;
+}
+
 // ====== 符計算のためのヘルパー ======
 
 /**
@@ -400,6 +584,75 @@ function evaluateDecomp(
     yaku.push({ name: '混老頭', han: 2 });
   }
 
+  // 混一色 / 清一色（数牌が1種類だけ）
+  const numSuits = numberSuitsOf(allTiles);
+  if (numSuits.size === 1) {
+    if (allTiles.some(t => t.suit === 'honor')) {
+      yaku.push({ name: '混一色', han: isClosed ? 3 : 2 });
+    } else {
+      yaku.push({ name: '清一色', han: isClosed ? 6 : 5 });
+    }
+  }
+
+  // 一盃口 / 二盃口（門前限定。同一順子の組数で判定）
+  if (isClosed) {
+    const seqStartCounts: Record<string, number> = {};
+    for (const s of decomp.filter(m => m.type === 'sequence')) {
+      const start = Math.min(...s.tiles.map(t => t.value));
+      const key = `${s.tiles[0].suit}_${start}`;
+      seqStartCounts[key] = (seqStartCounts[key] ?? 0) + 1;
+    }
+    let identicalPairs = 0;
+    for (const k in seqStartCounts) identicalPairs += Math.floor(seqStartCounts[k] / 2);
+    if (identicalPairs >= 2) yaku.push({ name: '二盃口', han: 3 });
+    else if (identicalPairs === 1) yaku.push({ name: '一盃口', han: 1 });
+  }
+
+  // 混全帯幺九（チャンタ）／純全帯幺九（純チャン）
+  // 各面子・雀頭が么九牌を含み、かつ順子を1つ以上含むこと。
+  const pairGroup = decomp.find(m => m.type === 'pair');
+  const chantaGroups = [...allMelds, ...(pairGroup ? [pairGroup] : [])];
+  const hasSequence = allMelds.some(m => m.type === 'sequence');
+  if (hasSequence && chantaGroups.every(g => g.tiles.some(isYaochuhai))) {
+    if (allTiles.every(t => t.suit !== 'honor')) {
+      yaku.push({ name: '純全帯幺九', han: isClosed ? 3 : 2 });
+    } else {
+      yaku.push({ name: '混全帯幺九', han: isClosed ? 2 : 1 });
+    }
+  }
+
+  // 三暗刻（暗刻3つ。4つは四暗刻＝役満として別処理）
+  if (countConcealedTriplets(decomp, openMelds, winTile, isTsumo) === 3) {
+    yaku.push({ name: '三暗刻', han: 2 });
+  }
+
+  // 三色同刻（同じ数字の刻子が3種類の数牌にそろう）
+  const tripletGroups = allMelds.filter(m => m.type === 'triplet');
+  for (const tg of tripletGroups) {
+    if (tg.tiles[0].suit === 'honor') continue;
+    const v = tg.tiles[0].value;
+    const suits = new Set(
+      tripletGroups
+        .filter(g => g.tiles[0].suit !== 'honor' && g.tiles[0].value === v)
+        .map(g => g.tiles[0].suit)
+    );
+    if (suits.size === 3) {
+      yaku.push({ name: '三色同刻', han: 2 });
+      break;
+    }
+  }
+
+  // 三槓子（槓子3つ。4つは四槓子＝役満として別処理）
+  if (openMelds.filter(m => m.type === 'minkan' || m.type === 'ankan').length === 3) {
+    yaku.push({ name: '三槓子', han: 2 });
+  }
+
+  // 小三元（三元牌の刻子2つ＋三元牌の雀頭）
+  const dragonTriplets = tripletGroups.filter(m => isDragon(m.tiles[0])).length;
+  if (dragonTriplets === 2 && pairGroup && isDragon(pairGroup.tiles[0])) {
+    yaku.push({ name: '小三元', han: 2 });
+  }
+
   return yaku;
 }
 
@@ -433,6 +686,19 @@ export function calculateScore(
   } = opts;
   const fullClosed = [...hand, winTile];
   const isClosed = openMelds.every(m => m.type === 'ankan');
+
+  // 役満は通常役・ドラとは複合しない。先に判定し、成立していれば固定点で返す。
+  // han フィールドには役満の倍数（1=単/2=ダブル）が入る。表示用には13倍して飜換算する。
+  const yakuman = detectYakuman(hand, fullClosed, openMelds, winTile, isTsumo);
+  if (yakuman.length > 0) {
+    const mult = yakuman.reduce((s, y) => s + y.han, 0);
+    return {
+      yakuList: yakuman.map(y => ({ name: y.name, han: 13 * y.han })),
+      totalHan: 13 * mult,
+      fu: 0,
+      basePoint: 8000 * mult,
+    };
+  }
 
   // ドラ・裏ドラ・北抜きの飜（分解の仕方に依存しない＝一度だけ計算）。
   // ただしこれ自体は役ではないので、本来の役がある時だけ後で加算する。

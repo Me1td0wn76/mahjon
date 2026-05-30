@@ -128,6 +128,27 @@ export function getTileName(tile: Tile): string {
 }
 
 /**
+ * テンパイ時の「待ち牌（アガリ牌）」を求める。
+ * 34種すべてを「この牌が来たら和了か？」と試し、和了できる種類を1枚ずつ返す。
+ * 手牌が待ちの形（13枚など length%3===1）のときだけ結果が返る。
+ * 初心者向けに「何待ちか」をUIに表示するために使う。
+ */
+export function getWaitingTiles(hand: Tile[], melds: Meld[]): Tile[] {
+  const results: Tile[] = [];
+  const types: [Suit, number][] = [];
+  for (const s of ['man', 'pin', 'sou'] as Suit[]) {
+    for (let v = 1; v <= 9; v++) types.push([s, v]);
+  }
+  for (let v = 1; v <= 7; v++) types.push(['honor', v]);
+
+  for (const [suit, value] of types) {
+    const testTile: Tile = { id: `wait-${suit}-${value}`, suit, value };
+    if (isWinningHandClient(hand, melds, testTile)) results.push(testTile);
+  }
+  return results;
+}
+
+/**
  * クライアント側で「今ツモ和了できるか？」をチェックする関数。
  * UI 上で「ツモ和了！」ボタンを出すかどうかを判断するために使う。
  * 手牌の各牌について、それを和了牌と仮定したときに和了形になるか試す。
