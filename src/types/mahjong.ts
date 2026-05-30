@@ -67,11 +67,13 @@ export interface GameView {
   players: PlayerView[];
   myHand: Tile[];
   mySeat: number;
-  availableClaims?: Array<'chi' | 'pon' | 'ron'>;            // 鳴きの選択肢（あれば）
+  availableClaims?: Array<'chi' | 'pon' | 'kan' | 'ron'>;    // 鳴きの選択肢（あれば）
   chiCombinations?: [string, string][];                      // チーの可能パターン
   canRiichi?: boolean;                                       // リーチ可能か
   canKita?: boolean;                                         // 北抜き可能か（三麻）
   canKyushuhai?: boolean;                                    // 九種九牌宣言可能か
+  ankanOptions?: string[];                                   // 暗槓できる牌のID（代表牌1枚／カン）
+  kakanOptions?: string[];                                   // 加槓できる手牌のID
 }
 
 // 局の結果
@@ -86,6 +88,8 @@ export interface RoundResult {
   melds?: Meld[];
   yakuList?: YakuInfo[];                                     // 成立役の一覧
   totalHan?: number;                                         // 合計飜
+  doraIndicators?: Tile[];                                   // ドラ表示牌
+  uraDoraIndicators?: Tile[];                                // 裏ドラ表示牌（リーチ和了時のみ）
   scoreDelta: Record<number, number>;
   newScores: Record<number, number>;
 }

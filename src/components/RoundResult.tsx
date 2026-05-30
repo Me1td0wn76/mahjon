@@ -77,6 +77,32 @@ export const RoundResultModal: React.FC<Props> = ({ result, players, mySeat, onR
                 </ul>
               </div>
             )}
+            {/* ドラ・裏ドラ表示牌（裏ドラはリーチ和了時のみサーバーから届く） */}
+            {((result.doraIndicators && result.doraIndicators.length > 0) ||
+              (result.uraDoraIndicators && result.uraDoraIndicators.length > 0)) && (
+              <div className="result-dora">
+                {result.doraIndicators && result.doraIndicators.length > 0 && (
+                  <div className="result-dora-row">
+                    <span className="result-dora-label">ドラ表示:</span>
+                    <div className="result-tiles">
+                      {result.doraIndicators.map((t, i) => (
+                        <TileComponent key={i} tile={t} small />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {result.uraDoraIndicators && result.uraDoraIndicators.length > 0 && (
+                  <div className="result-dora-row">
+                    <span className="result-dora-label">裏ドラ表示:</span>
+                    <div className="result-tiles">
+                      {result.uraDoraIndicators.map((t, i) => (
+                        <TileComponent key={i} tile={t} small />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
 

@@ -142,9 +142,9 @@ export function useSocket() {
     socketRef.current?.emit('discard-tile', tileId);
   }, []);
 
-  /** 鳴きを宣言（チー/ポン/ロン/スキップ） */
+  /** 鳴きを宣言（チー/ポン/カン/ロン/スキップ） */
   const claimAction = useCallback(
-    (type: 'chi' | 'pon' | 'ron' | 'skip', chiTiles?: [string, string]) => {
+    (type: 'chi' | 'pon' | 'kan' | 'ron' | 'skip', chiTiles?: [string, string]) => {
       socketRef.current?.emit('claim', { type, chiTiles });
     },
     []
@@ -158,6 +158,16 @@ export function useSocket() {
   /** リーチ宣言（同時に捨てる牌を指定） */
   const declareRiichi = useCallback((tileId: string) => {
     socketRef.current?.emit('declare-riichi', tileId);
+  }, []);
+
+  /** 暗槓（4枚のうち1枚のIDを指定） */
+  const declareAnkan = useCallback((tileId: string) => {
+    socketRef.current?.emit('declare-ankan', tileId);
+  }, []);
+
+  /** 加槓（ポンに足す1枚のIDを指定） */
+  const declareKakan = useCallback((tileId: string) => {
+    socketRef.current?.emit('declare-kakan', tileId);
   }, []);
 
   /** 北抜き（三麻専用） */
@@ -193,6 +203,8 @@ export function useSocket() {
     claimAction,
     declareTsumo,
     declareRiichi,
+    declareAnkan,
+    declareKakan,
     declareKita,
     declareKyushuhai,
     readyNext,

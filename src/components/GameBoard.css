@@ -412,6 +412,7 @@
 .btn-action.skip    { background: rgba(80, 80, 80, 0.6); border: 1px solid rgba(255, 255, 255, 0.2); color: #ccc; }
 .btn-action.riichi  { background: linear-gradient(135deg, #d63384, #7a1f4f); color: #fff; }
 .btn-action.kita    { background: linear-gradient(135deg, #20c0a0, #126b58); color: #fff; }
+.btn-action.kan     { background: linear-gradient(135deg, #d08020, #8a5210); color: #fff; }
 .btn-action.kyushu  { background: linear-gradient(135deg, #8050d0, #4a2a80); color: #fff; }
 
 /* リーチ供託棒の表示 */

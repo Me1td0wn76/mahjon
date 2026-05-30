@@ -15,6 +15,8 @@ import {
   handleClaim,
   handleTsumo,
   handleRiichi,
+  handleAnkan,
+  handleKakan,
   handleKita,
   handleKyushuhai,
   handleReadyNext,
@@ -132,7 +134,7 @@ io.on('connection', socket => {
 
   socket.on('start-game', () => {
     const ok = startGame(socket.id);
-    if (!ok) socket.emit('error', 'ゲームを開始できません（最低2名必要です）');
+    if (!ok) socket.emit('error', 'ゲームを開始できません（全員が揃ってから開始してください）');
   });
 
   socket.on('discard-tile', tileId => {
@@ -149,6 +151,14 @@ io.on('connection', socket => {
 
   socket.on('declare-riichi', tileId => {
     handleRiichi(socket.id, tileId);
+  });
+
+  socket.on('declare-ankan', tileId => {
+    handleAnkan(socket.id, tileId);
+  });
+
+  socket.on('declare-kakan', tileId => {
+    handleKakan(socket.id, tileId);
   });
 
   socket.on('declare-kita', () => {

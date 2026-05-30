@@ -114,7 +114,10 @@ function broadcastGameUpdate(room: Room): void {
 export function startGame(socketId: string): boolean {
   const room = getRoomBySocketId(socketId);
   if (!room || room.status !== 'waiting') return false;
-  if (room.players.length < 2) return false;
+  // 麻雀は全席（3人 or 4人）が埋まって初めて成立する。
+  // 席数(maxPlayers)に満たない状態で始めると、配牌ループが存在しない席を
+  // 参照してクラッシュするため、満員になるまで開始させない。
+  if (room.players.length !== room.maxPlayers) return false;
 
   room.status = 'playing';
   room.game = new MahjongGame(
@@ -134,7 +137,7 @@ export function startGame(socketId: string): boolean {
     (
       seat: number,
       _deadline: number,
-      available: Array<'chi' | 'pon' | 'ron'>,
+      available: Array<'chi' | 'pon' | 'kan' | 'ron'>,
       chiCombos: [string, string][]
     ) => {
       const player = room.players.find(p => p.seat === seat);
@@ -164,6 +167,14 @@ export function handleTsumo(socketId: string): void {
 
 export function handleRiichi(socketId: string, tileId: string): void {
   getRoomBySocketId(socketId)?.game?.handleRiichi(socketId, tileId);
+}
+
+export function handleAnkan(socketId: string, tileId: string): void {
+  getRoomBySocketId(socketId)?.game?.handleAnkan(socketId, tileId);
+}
+
+export function handleKakan(socketId: string, tileId: string): void {
+  getRoomBySocketId(socketId)?.game?.handleKakan(socketId, tileId);
 }
 
 export function handleKita(socketId: string): void {

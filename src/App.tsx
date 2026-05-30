@@ -52,6 +52,8 @@ function Game() {
     claimAction,
     declareTsumo,
     declareRiichi,
+    declareAnkan,
+    declareKakan,
     declareKita,
     declareKyushuhai,
     readyNext,
@@ -107,6 +109,8 @@ function Game() {
             onClaim={claimAction}
             onTsumo={declareTsumo}
             onRiichi={declareRiichi}
+            onAnkan={declareAnkan}
+            onKakan={declareKakan}
             onKita={declareKita}
             onKyushuhai={declareKyushuhai}
           />

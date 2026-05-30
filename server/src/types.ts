@@ -38,7 +38,7 @@ export const WINDS: Wind[] = ['east', 'south', 'west', 'north'];
 
 // クライアント側から鳴きを宣言する時に送るデータの型
 export interface ClaimRequest {
-  type: 'chi' | 'pon' | 'ron' | 'skip';
+  type: 'chi' | 'pon' | 'kan' | 'ron' | 'skip';
   chiTiles?: [string, string];
 }
 
@@ -77,11 +77,13 @@ export interface GameView {
   players: PlayerView[];
   myHand: Tile[];
   mySeat: number;
-  availableClaims?: Array<'chi' | 'pon' | 'ron'>;
+  availableClaims?: Array<'chi' | 'pon' | 'kan' | 'ron'>;
   chiCombinations?: [string, string][];
   canRiichi?: boolean;                               // 自分がリーチ宣言可能か
   canKita?: boolean;                                 // 三麻で北抜き可能か
   canKyushuhai?: boolean;                            // 九種九牌の宣言可能か
+  ankanOptions?: string[];                           // 暗槓できる牌のID（代表牌1枚／カン）
+  kakanOptions?: string[];                           // 加槓できる手牌のID
 }
 
 // 1局終了時の結果情報
@@ -96,6 +98,8 @@ export interface RoundResult {
   melds?: Meld[];
   yakuList?: YakuInfo[];                             // 成立した役
   totalHan?: number;                                 // 合計飜数
+  doraIndicators?: Tile[];                           // ドラ表示牌
+  uraDoraIndicators?: Tile[];                        // 裏ドラ表示牌（リーチ和了時のみ公開）
   scoreDelta: Record<number, number>;
   newScores: Record<number, number>;
 }
@@ -141,6 +145,8 @@ export interface ClientToServerEvents {
   claim: (claim: ClaimRequest) => void;
   'declare-tsumo': () => void;
   'declare-riichi': (tileId: string) => void;        // リーチ宣言（同時に捨て牌を指定）
+  'declare-ankan': (tileId: string) => void;         // 暗槓（4枚のうち1枚のID）
+  'declare-kakan': (tileId: string) => void;         // 加槓（ポンに足す1枚のID）
   'declare-kita': () => void;                        // 三麻の北抜き
   'declare-kyushuhai': () => void;                   // 九種九牌で流局宣言
   'ready-next': () => void;

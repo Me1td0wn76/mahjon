@@ -150,10 +150,12 @@ const ScoreCell: React.FC<{ wind: Wind; score: number; active: boolean }> = ({
 interface Props {
   gameView: GameView;
   onDiscard: (tileId: string) => void;
-  onClaim: (type: 'chi' | 'pon' | 'ron' | 'skip', chiTiles?: [string, string]) => void;
+  onClaim: (type: 'chi' | 'pon' | 'kan' | 'ron' | 'skip', chiTiles?: [string, string]) => void;
   onTsumo: () => void;
   // 以下は省略可能（preview モードでも使えるように）
   onRiichi?: (tileId: string) => void;
+  onAnkan?: (tileId: string) => void;
+  onKakan?: (tileId: string) => void;
   onKita?: () => void;
   onKyushuhai?: () => void;
 }
@@ -164,6 +166,8 @@ export const GameBoard: React.FC<Props> = ({
   onClaim,
   onTsumo,
   onRiichi,
+  onAnkan,
+  onKakan,
   onKita,
   onKyushuhai,
 }) => {
@@ -193,6 +197,8 @@ export const GameBoard: React.FC<Props> = ({
     canRiichi,
     canKita,
     canKyushuhai,
+    ankanOptions,
+    kakanOptions,
   } = gameView;
 
   const pc = players.length;
@@ -490,6 +496,26 @@ export const GameBoard: React.FC<Props> = ({
                   </button>
                 </>
               )}
+              {/* 暗槓ボタン（同じ牌4枚） */}
+              {onAnkan && !riichiMode && ankanOptions?.map(tileId => (
+                <button
+                  key={`ankan-${tileId}`}
+                  className="btn-action kan"
+                  onClick={() => onAnkan(tileId)}
+                >
+                  暗槓 {getTileName(myHand.find(t => t.id === tileId)!)}
+                </button>
+              ))}
+              {/* 加槓ボタン（ポンに足す） */}
+              {onKakan && !riichiMode && kakanOptions?.map(tileId => (
+                <button
+                  key={`kakan-${tileId}`}
+                  className="btn-action kan"
+                  onClick={() => onKakan(tileId)}
+                >
+                  加槓 {getTileName(myHand.find(t => t.id === tileId)!)}
+                </button>
+              ))}
               {/* 三麻の北抜きボタン */}
               {canKita && onKita && !riichiMode && (
                 <button className="btn-action kita" onClick={onKita}>
@@ -520,6 +546,11 @@ export const GameBoard: React.FC<Props> = ({
               {availableClaims?.includes('pon') && (
                 <button className="btn-action pon" onClick={() => onClaim('pon')}>
                   ポン
+                </button>
+              )}
+              {availableClaims?.includes('kan') && (
+                <button className="btn-action kan" onClick={() => onClaim('kan')}>
+                  カン
                 </button>
               )}
               {availableClaims?.includes('chi') && (

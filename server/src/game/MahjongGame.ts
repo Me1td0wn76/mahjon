@@ -32,6 +32,9 @@ interface PlayerState {
   score: number;
   claimResponse?: ClaimRequest | null;
   isRiichi: boolean;                       // リーチ済みかどうか
+  isDoubleRiichi: boolean;                 // ダブル立直（第1打でのリーチ）
+  ippatsuEligible: boolean;                // 一発の権利が残っているか
+  rinshanEligible: boolean;                // 次の和了が嶺上開花になり得るか（カン直後）
   kitaCount: number;                       // 三麻の北抜き枚数
 }
 
@@ -46,11 +49,19 @@ export class MahjongGame {
   private dealer = 0;
   private currentTurn = 0;
   private doraIndicators: Tile[] = [];
+  private uraDoraIndicators: Tile[] = [];  // 裏ドラ表示牌（リーチ和了時のみ公開）
+  private deadWall: Tile[] = [];           // 王牌14枚（嶺上牌・ドラ/裏ドラ表示牌）
+  private rinshanTiles: Tile[] = [];       // 嶺上牌（カンの補充ツモ用、最大4枚）
+  private kanCount = 0;                     // この局で行われたカンの回数（新ドラ・嶺上牌の管理）
   private lastDiscard?: { tile: Tile; seat: number };
   private claimTimer?: ReturnType<typeof setTimeout>;
   private readyCount = 0;
   // 配牌直後だけ true。九種九牌宣言期間の管理。
   private firstGoAround = false;
+  // この局で一度でも鳴き（ポン・チー・カン）があったか。ダブル立直の判定に使う。
+  private anyCallMade = false;
+  // リーチ宣言の打牌だけ、リーチ後の打牌制限を一時的に解除するためのフラグ。
+  private bypassRiichiLock = false;
 
   constructor(
     private readonly playerCount: 3 | 4,
@@ -60,7 +71,7 @@ export class MahjongGame {
     private readonly onClaimWindow: (
       seat: number,
       deadline: number,
-      available: Array<'chi' | 'pon' | 'ron'>,
+      available: Array<'chi' | 'pon' | 'kan' | 'ron'>,
       chiCombos: [string, string][]
     ) => void
   ) {
@@ -72,6 +83,9 @@ export class MahjongGame {
       // 初期点数を 30000 点に統一（リーチ供託 + 順位ボーナス前提の均衡値）
       score: 30000,
       isRiichi: false,
+      isDoubleRiichi: false,
+      ippatsuEligible: false,
+      rinshanEligible: false,
       kitaCount: 0,
     }));
   }
@@ -88,7 +102,16 @@ export class MahjongGame {
     const allTiles = shuffleTiles(createTileset(this.playerCount));
     const deadWall = allTiles.slice(-14);
     this.wall = allTiles.slice(0, -14);
-    this.doraIndicators = [deadWall[0]];
+    // 王牌14枚の簡易配置:
+    //   index 0-3   … 嶺上牌（カンの補充ツモ、最大4回）
+    //   index 4,6,8,10,12 … ドラ表示牌（初期＋カンごとに1枚めくる）
+    //   index 5,7,9,11,13 … その裏（裏ドラ表示牌）
+    this.deadWall = deadWall;
+    this.rinshanTiles = deadWall.slice(0, 4);
+    this.doraIndicators = [deadWall[4]];
+    this.uraDoraIndicators = [deadWall[5]];
+    this.kanCount = 0;
+    this.anyCallMade = false;
 
     for (const p of this.players) {
       p.hand = [];
@@ -96,6 +119,9 @@ export class MahjongGame {
       p.melds = [];
       p.claimResponse = undefined;
       p.isRiichi = false;
+      p.isDoubleRiichi = false;
+      p.ippatsuEligible = false;
+      p.rinshanEligible = false;
       p.kitaCount = 0;
     }
 
@@ -141,11 +167,26 @@ export class MahjongGame {
     const player = this.players.find(p => p.socketId === socketId);
     if (!player || player.seat !== this.currentTurn || this.phase !== 'discard') return;
 
-    // リーチ中は手牌の自由打牌不可（ツモ切りに相当する最後の牌のみ可）
-    if (player.isRiichi && player.hand[player.hand.length - 1].id !== tileId) return;
+    // リーチ中は手牌の自由打牌不可（ツモ切りに相当する最後の牌のみ可）。
+    // ただしリーチ宣言の打牌そのものは bypassRiichiLock により許可する。
+    if (
+      player.isRiichi &&
+      !this.bypassRiichiLock &&
+      player.hand[player.hand.length - 1].id !== tileId
+    ) {
+      return;
+    }
 
     const idx = player.hand.findIndex(t => t.id === tileId);
     if (idx === -1) return;
+
+    // リーチ後、自分の次の打牌（ツモ切り）を行った時点で一発の権利は消滅する。
+    // リーチ宣言の打牌（bypass中）では消さない。
+    if (player.ippatsuEligible && !this.bypassRiichiLock) {
+      player.ippatsuEligible = false;
+    }
+    // 嶺上開花の権利は、補充ツモ後に打牌（＝ツモらず捨てた）時点で消滅する。
+    player.rinshanEligible = false;
 
     const tile = player.hand.splice(idx, 1)[0];
     player.discards.push(tile);
@@ -164,7 +205,7 @@ export class MahjongGame {
     const player = this.players.find(p => p.socketId === socketId);
     if (!player || player.seat !== this.currentTurn || this.phase !== 'discard') return;
     if (player.isRiichi) return;
-    if (player.melds.length > 0) return;              // 門前限定
+    if (!this.isMenzen(player)) return;               // 門前限定（暗槓は門前を崩さない）
     if (player.score < RIICHI_STICK) return;
     if (this.wall.length < 4) return;
 
@@ -174,12 +215,21 @@ export class MahjongGame {
     const remaining = [...player.hand.slice(0, idx), ...player.hand.slice(idx + 1)];
     if (!isTenpai(remaining, player.melds)) return;
 
+    // ダブル立直: この局でまだ鳴きが入っておらず、自分の第1打である場合。
+    const isDouble = !this.anyCallMade && player.discards.length === 0;
+
     player.isRiichi = true;
+    player.isDoubleRiichi = isDouble;
     player.score -= RIICHI_STICK;
     this.riichiSticks += 1;
+    // 宣言打牌の直前に一発の権利を付与しておく。
+    // （宣言牌が鳴かれた場合は resolvePon/Chi 側で権利が取り消される）
+    player.ippatsuEligible = true;
 
-    // 通常の打牌処理に流す
+    // リーチ宣言の打牌はリーチ制限を一時解除して処理する。
+    this.bypassRiichiLock = true;
     this.handleDiscard(socketId, tileId);
+    this.bypassRiichiLock = false;
   }
 
   /**
@@ -281,9 +331,9 @@ export class MahjongGame {
     seat: number,
     tile: Tile,
     discardSeat: number
-  ): Array<'chi' | 'pon' | 'ron'> {
+  ): Array<'chi' | 'pon' | 'kan' | 'ron'> {
     const player = this.players.find(p => p.seat === seat)!;
-    const result: Array<'chi' | 'pon' | 'ron'> = [];
+    const result: Array<'chi' | 'pon' | 'kan' | 'ron'> = [];
 
     if (checkWin(player.hand, player.melds, tile).isWin) result.push('ron');
 
@@ -292,6 +342,8 @@ export class MahjongGame {
 
     const matching = player.hand.filter(t => tilesEqual(t, tile));
     if (matching.length >= 2) result.push('pon');
+    // 大明槓: 手牌に同じ牌を3枚持っていれば可能
+    if (matching.length >= 3) result.push('kan');
 
     // 三麻ではチー禁止
     if (this.playerCount === 4) {
@@ -329,6 +381,13 @@ export class MahjongGame {
       return;
     }
 
+    // 大明槓はポンより優先（同じ牌をカンする人がいればポンは成立しない）
+    const kanner = this.players.find(p => p.claimResponse?.type === 'kan');
+    if (kanner) {
+      this.resolveDaiminkan(kanner);
+      return;
+    }
+
     const ponner = this.players.find(p => p.claimResponse?.type === 'pon');
     if (ponner) {
       this.resolvePon(ponner);
@@ -363,7 +422,13 @@ export class MahjongGame {
       winner.isRiichi,
       WINDS[winner.seat],
       this.round,
-      winner.kitaCount
+      winner.kitaCount,
+      {
+        isIppatsu: winner.ippatsuEligible,
+        isDoubleRiichi: winner.isDoubleRiichi,
+        doraIndicators: this.doraIndicators,
+        uraDoraIndicators: this.uraDoraIndicators,
+      }
     );
 
     // 役なしロンは認めない（簡略: ここでは1飜以上を要求）
@@ -399,9 +464,148 @@ export class MahjongGame {
       melds: [...winner.melds],
       yakuList: scoring.yakuList,
       totalHan: scoring.totalHan,
+      doraIndicators: [...this.doraIndicators],
+      uraDoraIndicators: winner.isRiichi ? [...this.uraDoraIndicators] : undefined,
       scoreDelta,
       newScores: Object.fromEntries(this.players.map(p => [p.seat, p.score])),
     });
+  }
+
+  /**
+   * 鳴き（ポン・チー）で取られた牌を、捨てた人の河（discards）から取り除く。
+   * 鳴かれた牌は河から面子へ移動するため、河に残してはいけない。
+   */
+  private removeClaimedTileFromRiver(): void {
+    const { tile, seat } = this.lastDiscard!;
+    const discarder = this.players.find(p => p.seat === seat)!;
+    const idx = discarder.discards.findIndex(t => t.id === tile.id);
+    if (idx !== -1) discarder.discards.splice(idx, 1);
+  }
+
+  /**
+   * 鳴き（ポン・チー・カン）が発生したときの共通処理。
+   * 一発は鳴きが入った時点で全員消滅し、以後の局はダブル立直対象外になる。
+   */
+  private onCallMade(): void {
+    this.anyCallMade = true;
+    for (const p of this.players) p.ippatsuEligible = false;
+  }
+
+  /**
+   * 門前（鳴いていない）状態か。暗槓は門前を崩さないため、
+   * チー・ポン・明槓（大明槓/加槓）が1つでもあれば門前ではない。
+   */
+  private isMenzen(player: PlayerState): boolean {
+    return player.melds.every(m => m.type === 'ankan');
+  }
+
+  /**
+   * カン成立時に新しいドラ（と裏ドラ）表示牌を1組めくる。最大4回まで。
+   */
+  private revealNewKanDora(): void {
+    if (this.kanCount >= 4) return;
+    this.kanCount += 1;
+    const di = 4 + this.kanCount * 2;     // 6, 8, 10, 12
+    if (this.deadWall[di]) this.doraIndicators.push(this.deadWall[di]);
+    if (this.deadWall[di + 1]) this.uraDoraIndicators.push(this.deadWall[di + 1]);
+  }
+
+  /**
+   * カンの補充ツモ（嶺上牌）。嶺上牌が尽きていれば流局扱い。
+   * @returns 補充できたら true。
+   */
+  private drawRinshan(player: PlayerState): boolean {
+    const tile = this.rinshanTiles.shift();
+    if (!tile) {
+      this.handleExhaustedWall();
+      return false;
+    }
+    player.hand.push(tile);
+    player.hand = sortHand(player.hand);
+    player.rinshanEligible = true;        // 次のツモ和了は嶺上開花
+    return true;
+  }
+
+  /**
+   * 暗槓（あんかん）。自分の手番で同じ牌を4枚持っている時に宣言できる。
+   * 暗槓は門前を崩さないのでリーチ後でも本来は可能だが、
+   * 待ちが変わる暗槓の判定が複雑なため、ここではリーチ後の暗槓は不可とする。
+   * @param tileId 4枚のうちどれか1枚のID（同じ種類4枚をまとめてカンする）
+   */
+  handleAnkan(socketId: string, tileId: string): void {
+    const player = this.players.find(p => p.socketId === socketId);
+    if (!player || player.seat !== this.currentTurn || this.phase !== 'discard') return;
+    if (player.isRiichi) return;          // リーチ後の暗槓は未対応
+
+    const target = player.hand.find(t => t.id === tileId);
+    if (!target) return;
+    const quad = player.hand.filter(t => tilesEqual(t, target));
+    if (quad.length !== 4) return;        // 4枚揃っていなければ不可
+
+    // 手牌から4枚抜いて暗槓面子にする
+    player.hand = player.hand.filter(t => !tilesEqual(t, target));
+    player.melds.push({ type: 'ankan', tiles: quad });
+
+    this.onCallMade();
+    this.revealNewKanDora();
+    if (!this.drawRinshan(player)) return;
+    this.firstGoAround = false;
+    this.onStateChange();
+  }
+
+  /**
+   * 加槓（かかん／小明槓）。既存のポン面子に同じ牌をもう1枚足してカンにする。
+   * @param tileId 手牌にある追加する1枚のID
+   */
+  handleKakan(socketId: string, tileId: string): void {
+    const player = this.players.find(p => p.socketId === socketId);
+    if (!player || player.seat !== this.currentTurn || this.phase !== 'discard') return;
+    if (player.isRiichi) return;          // リーチ後は手牌構成を変えられない
+
+    const target = player.hand.find(t => t.id === tileId);
+    if (!target) return;
+    // 同じ牌のポン面子を探す
+    const pon = player.melds.find(m => m.type === 'pon' && tilesEqual(m.tiles[0], target));
+    if (!pon) return;
+
+    // ポンを明槓（カン）に昇格させ、手牌から1枚移す
+    player.hand = player.hand.filter(t => t.id !== tileId);
+    pon.type = 'minkan';
+    pon.tiles = [...pon.tiles, target];
+
+    this.onCallMade();
+    this.revealNewKanDora();
+    if (!this.drawRinshan(player)) return;
+    this.firstGoAround = false;
+    this.onStateChange();
+  }
+
+  /**
+   * 大明槓（だいみんかん）。他家の捨て牌に対し、手牌に同じ牌3枚を持つ時に成立。
+   * 鳴き処理（processClaims）から呼ばれる。
+   */
+  private resolveDaiminkan(claimer: PlayerState): void {
+    const discardTile = this.lastDiscard!.tile;
+    const matching = claimer.hand.filter(t => tilesEqual(t, discardTile)).slice(0, 3);
+    if (matching.length !== 3) {
+      claimer.claimResponse = null;
+      this.processClaims();
+      return;
+    }
+    const matchIds = new Set(matching.map(t => t.id));
+    claimer.hand = claimer.hand.filter(t => !matchIds.has(t.id));
+    claimer.melds.push({
+      type: 'minkan',
+      tiles: [discardTile, ...matching],
+      fromSeat: this.lastDiscard!.seat,
+    });
+    this.removeClaimedTileFromRiver();
+    this.onCallMade();
+    this.revealNewKanDora();
+    this.currentTurn = claimer.seat;
+    this.phase = 'discard';
+    if (!this.drawRinshan(claimer)) return;
+    this.onStateChange();
   }
 
   private resolvePon(claimer: PlayerState): void {
@@ -425,6 +629,8 @@ export class MahjongGame {
       tiles: [discardTile, ...ponTiles],
       fromSeat: this.lastDiscard!.seat,
     });
+    this.removeClaimedTileFromRiver();
+    this.onCallMade();
 
     this.currentTurn = claimer.seat;
     this.phase = 'discard';
@@ -461,6 +667,8 @@ export class MahjongGame {
     claimer.hand = newHand;
     const meldTiles = [...chiFromHand, discardTile].sort((a, b) => a.value - b.value);
     claimer.melds.push({ type: 'chi', tiles: meldTiles, fromSeat: this.lastDiscard!.seat });
+    this.removeClaimedTileFromRiver();
+    this.onCallMade();
 
     this.currentTurn = claimer.seat;
     this.phase = 'discard';
@@ -491,7 +699,14 @@ export class MahjongGame {
       player.isRiichi,
       WINDS[player.seat],
       this.round,
-      player.kitaCount
+      player.kitaCount,
+      {
+        isIppatsu: player.ippatsuEligible,
+        isDoubleRiichi: player.isDoubleRiichi,
+        isRinshan: player.rinshanEligible,
+        doraIndicators: this.doraIndicators,
+        uraDoraIndicators: this.uraDoraIndicators,
+      }
     );
 
     // 役なしツモは認めない（リーチ・門前清自摸和でも0飜なら何かおかしい）
@@ -534,6 +749,8 @@ export class MahjongGame {
       melds: [...player.melds],
       yakuList: scoring.yakuList,
       totalHan: scoring.totalHan,
+      doraIndicators: [...this.doraIndicators],
+      uraDoraIndicators: player.isRiichi ? [...this.uraDoraIndicators] : undefined,
       scoreDelta,
       newScores: Object.fromEntries(this.players.map(p => [p.seat, p.score])),
     });
@@ -623,15 +840,36 @@ export class MahjongGame {
       kitaCount: p.kitaCount,
     }));
 
-    // 自分が今リーチ宣言可能かを判定
+    // 自分が今リーチ宣言可能かを判定（暗槓のみなら門前を維持）
     const canRiichi =
       me.seat === this.currentTurn &&
       this.phase === 'discard' &&
       !me.isRiichi &&
-      me.melds.length === 0 &&
+      this.isMenzen(me) &&
       me.score >= RIICHI_STICK &&
       this.wall.length >= 4 &&
       isTenpai(me.hand, me.melds);
+
+    // カン可能か（自分の手番・打牌フェーズ・リーチ中でない）
+    const myTurnDiscard =
+      me.seat === this.currentTurn && this.phase === 'discard' && !me.isRiichi;
+    // 暗槓: 同じ牌4枚ごとに代表牌のIDを1つ返す
+    const ankanOptions: string[] = [];
+    // 加槓: 既存のポンに足せる手牌のIDを返す
+    const kakanOptions: string[] = [];
+    if (myTurnDiscard) {
+      const seen = new Set<string>();
+      for (const t of me.hand) {
+        const key = `${t.suit}_${t.value}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          if (me.hand.filter(x => tilesEqual(x, t)).length === 4) ankanOptions.push(t.id);
+        }
+        if (me.melds.some(m => m.type === 'pon' && tilesEqual(m.tiles[0], t))) {
+          kakanOptions.push(t.id);
+        }
+      }
+    }
 
     // 北抜き可能か（三麻のみ、北牌を持っている）
     const canKita =
@@ -666,12 +904,14 @@ export class MahjongGame {
       canRiichi,
       canKita,
       canKyushuhai,
+      ankanOptions,
+      kakanOptions,
     };
   }
 
   getViewWithClaims(
     socketId: string,
-    available: Array<'chi' | 'pon' | 'ron'>,
+    available: Array<'chi' | 'pon' | 'kan' | 'ron'>,
     chiCombinations: [string, string][]
   ): GameView | null {
     const view = this.getViewForPlayer(socketId);

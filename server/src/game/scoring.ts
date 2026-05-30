@@ -1,7 +1,7 @@
 // このファイルは「役判定と点数計算」を担当します。
 // 簡略ルールとして、主要な役だけを判定し、飜数 → 点数テーブルで支払額を決めます。
 // 符計算は省略（30符固定相当）。本格的な麻雀点数計算ではありません。
-import { Tile, Meld, Wind } from '../types.js';
+import { Tile, Meld, Wind, Suit } from '../types.js';
 import { compareTiles, tilesEqual } from './tiles.js';
 
 // 判定された1つの役
@@ -15,6 +15,41 @@ export interface ScoringResult {
   yakuList: Yaku[];
   totalHan: number;
   basePoint: number;       // ベース支払い額（親なら×6、子ロン×4、子ツモ親×2子×1）
+}
+
+// リーチ周りの追加役やドラ表示牌など、状況依存の入力をまとめたオプション
+export interface ScoreOptions {
+  isIppatsu?: boolean;            // 一発（リーチ後1巡以内・鳴き無しで和了）
+  isDoubleRiichi?: boolean;       // ダブル立直（第1打でのリーチ）
+  isRinshan?: boolean;            // 嶺上開花（カンの補充ツモで和了）
+  doraIndicators?: Tile[];        // ドラ表示牌
+  uraDoraIndicators?: Tile[];     // 裏ドラ表示牌（リーチ和了時のみ参照）
+}
+
+/**
+ * ドラ表示牌から「実際のドラ牌」を求める。
+ * 数牌は次の数字（9→1）、風牌は東南西北を循環（北→東）、
+ * 三元牌は白發中を循環（中→白）。
+ */
+function doraTileFromIndicator(ind: Tile): { suit: Suit; value: number } {
+  if (ind.suit === 'honor') {
+    // 1-4=風牌(東南西北), 5-7=三元牌(白發中)
+    if (ind.value <= 4) return { suit: 'honor', value: ind.value === 4 ? 1 : ind.value + 1 };
+    return { suit: 'honor', value: ind.value === 7 ? 5 : ind.value + 1 };
+  }
+  return { suit: ind.suit, value: ind.value === 9 ? 1 : ind.value + 1 };
+}
+
+/** 手牌（鳴き含む）の中に、表示牌が示すドラが何枚あるかを数える。 */
+function countDora(tiles: Tile[], indicators: Tile[]): number {
+  let count = 0;
+  for (const ind of indicators) {
+    const d = doraTileFromIndicator(ind);
+    for (const t of tiles) {
+      if (t.suit === d.suit && t.value === d.value) count++;
+    }
+  }
+  return count;
 }
 
 /**
@@ -146,10 +181,14 @@ function evaluateDecomp(
   isRiichi: boolean,
   seatWind: Wind,
   roundWind: Wind,
-  allTiles: Tile[]
+  allTiles: Tile[],
+  isIppatsu: boolean,
+  isDoubleRiichi: boolean,
+  isRinshan: boolean
 ): Yaku[] {
   const yaku: Yaku[] = [];
-  const isClosed = openMelds.length === 0;
+  // 暗槓は門前を崩さない。チー・ポン・明槓があるときだけ「非門前」とする。
+  const isClosed = openMelds.every(m => m.type === 'ankan');
 
   // 鳴いた面子もまとめて考慮
   const allMelds: MeldDecomp[] = [...decomp];
@@ -161,8 +200,13 @@ function evaluateDecomp(
     }
   }
 
-  // 立直
-  if (isRiichi) yaku.push({ name: '立直', han: 1 });
+  // 立直 / ダブル立直（両者は複合せず、ダブル立直を優先）
+  if (isDoubleRiichi) yaku.push({ name: 'ダブル立直', han: 2 });
+  else if (isRiichi) yaku.push({ name: '立直', han: 1 });
+  // 一発（リーチが前提）
+  if (isIppatsu) yaku.push({ name: '一発', han: 1 });
+  // 嶺上開花（カンの補充ツモで和了）
+  if (isRinshan) yaku.push({ name: '嶺上開花', han: 1 });
   // 門前清自摸和
   if (isClosed && isTsumo) yaku.push({ name: '門前清自摸和', han: 1 });
 
@@ -265,8 +309,10 @@ export function calculateScore(
   isRiichi: boolean,
   seatWind: Wind,
   roundWind: Wind,
-  kitaCount: number
+  kitaCount: number,
+  opts: ScoreOptions = {}
 ): ScoringResult {
+  const { isIppatsu = false, isDoubleRiichi = false, isRinshan = false } = opts;
   const fullClosed = [...hand, winTile];
   let bestYaku: Yaku[] = [];
   let bestHan = 0;
@@ -274,7 +320,9 @@ export function calculateScore(
   // 七対子チェック
   if (openMelds.length === 0 && isChiitoitsu(fullClosed)) {
     const yaku: Yaku[] = [{ name: '七対子', han: 2 }];
-    if (isRiichi) yaku.push({ name: '立直', han: 1 });
+    if (isDoubleRiichi) yaku.push({ name: 'ダブル立直', han: 2 });
+    else if (isRiichi) yaku.push({ name: '立直', han: 1 });
+    if (isIppatsu) yaku.push({ name: '一発', han: 1 });
     if (isTsumo) yaku.push({ name: '門前清自摸和', han: 1 });
     // タンヤオも七対子と複合可
     if (fullClosed.every(t => t.suit !== 'honor' && t.value >= 2 && t.value <= 8)) {
@@ -294,7 +342,10 @@ export function calculateScore(
       isRiichi,
       seatWind,
       roundWind,
-      [...fullClosed, ...openMelds.flatMap(m => m.tiles)]
+      [...fullClosed, ...openMelds.flatMap(m => m.tiles)],
+      isIppatsu,
+      isDoubleRiichi,
+      isRinshan
     );
     const han = yaku.reduce((s, y) => s + y.han, 0);
     if (han > bestHan) {
@@ -303,10 +354,33 @@ export function calculateScore(
     }
   }
 
+  // ここまでで成立した「本来の役」が1つでもあるか。
+  // ドラ・裏ドラ・北抜きドラはそれ自体では和了役にならないため、
+  // 役が無い手にドラだけ乗せて和了扱いにしないようゲートする。
+  const hasYaku = bestHan > 0;
+
   // 北抜きドラ（三麻専用）
-  if (kitaCount > 0) {
+  if (hasYaku && kitaCount > 0) {
     bestYaku.push({ name: `抜きドラ(北×${kitaCount})`, han: kitaCount });
     bestHan += kitaCount;
+  }
+
+  // ドラ・裏ドラ（役が成立している時のみ加算）
+  if (hasYaku) {
+    const allFinalTiles = [...fullClosed, ...openMelds.flatMap(m => m.tiles)];
+    const doraCount = countDora(allFinalTiles, opts.doraIndicators ?? []);
+    if (doraCount > 0) {
+      bestYaku.push({ name: 'ドラ', han: doraCount });
+      bestHan += doraCount;
+    }
+    // 裏ドラはリーチ和了時のみ
+    if (isRiichi) {
+      const uraCount = countDora(allFinalTiles, opts.uraDoraIndicators ?? []);
+      if (uraCount > 0) {
+        bestYaku.push({ name: '裏ドラ', han: uraCount });
+        bestHan += uraCount;
+      }
+    }
   }
 
   // 飜数から基本点を決定（簡易テーブル）

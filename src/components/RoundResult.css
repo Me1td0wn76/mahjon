@@ -119,6 +119,28 @@
   justify-content: center;
 }
 
+/* ドラ・裏ドラ表示牌エリア */
+.result-dora {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.result-dora-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.result-dora-label {
+  color: #aaa;
+  font-size: 0.82rem;
+  min-width: 72px;
+  text-align: right;
+}
+
 /* 役表示エリア */
 .result-yaku {
   background: rgba(240, 220, 96, 0.08);

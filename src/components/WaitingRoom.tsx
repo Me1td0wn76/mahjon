@@ -74,9 +74,9 @@ export const WaitingRoom: React.FC<Props> = ({
           <button
             className="btn-start"
             onClick={onStartGame}
-            disabled={players.length < 2}
+            disabled={!isFull}
           >
-            {players.length < 2 ? '最低2名必要です' : 'ゲーム開始！'}
+            {isFull ? 'ゲーム開始！' : `あと${maxPlayers - players.length}人待っています`}
           </button>
         )}
 
