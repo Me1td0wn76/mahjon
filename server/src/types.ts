@@ -15,68 +15,80 @@ export interface Tile {
 
 // 鳴き（チー・ポン・カン）の情報をまとめた型
 export interface Meld {
+  // どの鳴きか。'minkan'=明槓（他家からのカン）、'ankan'=暗槓（自分だけで作るカン）
   type: 'chi' | 'pon' | 'minkan' | 'ankan';
-  tiles: Tile[];
+  tiles: Tile[];      // その鳴きを構成する牌の一覧
+  // どの席から鳴いたか。`?` を付けると「省略可能（あってもなくてもよい）」になる。
+  // 暗槓のように相手から取らない鳴きでは存在しないため、必須にしていない。
   fromSeat?: number;
 }
 
-// ゲームの「現在の局面（フェーズ）」
+// ゲームの「現在の局面（フェーズ）」。`|` でつないだ型は「このどれか1つ」を意味する（ユニオン型）。
+// 文字列をそのまま型にすることで、決まった値しか入れられなくなり打ち間違いを防げる。
 export type GamePhase =
-  | 'dealing'
-  | 'draw'
-  | 'discard'
-  | 'claiming'
+  | 'dealing'        // 配牌中
+  | 'draw'           // 牌を引く番
+  | 'discard'        // 牌を捨てる番
+  | 'claiming'       // 他家が鳴き／ロンを宣言できる待ち
   | 'kyushuCheck'    // 九種九牌の宣言可能フェーズ（配牌直後）
-  | 'roundEnd'
-  | 'gameOver';
+  | 'roundEnd'       // 局の終了（結果表示）
+  | 'gameOver';      // ゲーム全体の終了
 
 // 風（席の位置）の型
 export type Wind = 'east' | 'south' | 'west' | 'north';
 
-// 配列の中身を順序付きで保持
+// WINDS は席順（東→南→西→北）を順番どおりに並べた配列。
+// `as const` ではなく型注釈 `: Wind[]` を付けて、Wind 以外が混ざらないようにしている。
+// 「次の席」を求めるときなど、順番が決まっているのを利用してインデックスで回せる。
 export const WINDS: Wind[] = ['east', 'south', 'west', 'north'];
 
 // クライアント側から鳴きを宣言する時に送るデータの型
 export interface ClaimRequest {
+  // 'skip' は「鳴かずに見送る」。鳴ける場面で何も選ばない人を待たないために必要。
   type: 'chi' | 'pon' | 'kan' | 'ron' | 'skip';
+  // チーのときだけ「手牌のどの2枚を使うか」を指定する。
+  // `[string, string]` はタプル型で、「ちょうど2要素の配列」を表す（チーは2枚使うため）。
   chiTiles?: [string, string];
 }
 
 // 1つの役の表示用情報
 export interface YakuInfo {
-  name: string;
-  han: number;
+  name: string;     // 役の名前（例: "立直", "平和"）
+  han: number;      // その役の飜数
 }
 
-// 各プレイヤーの「公開できる情報」だけをまとめた型
+// 各プレイヤーの「公開できる情報」だけをまとめた型。
+// 手牌の中身（myHand）はここに入れず、他人に見せてよい情報だけに絞っているのがポイント。
+// こうすることで、サーバーが誤って相手の手牌を全員に送ってしまう事故を構造的に防げる。
 export interface PlayerView {
-  seat: number;
-  name: string;
-  handCount: number;
-  discards: Tile[];
-  melds: Meld[];
-  score: number;
-  isDealer: boolean;
-  seatWind: Wind;
+  seat: number;            // 席番号（0始まり）
+  name: string;            // プレイヤー名
+  handCount: number;       // 手牌の「枚数」だけ。中身は見せない
+  discards: Tile[];        // 捨て牌（河）。これは全員に公開される情報
+  melds: Meld[];           // 鳴いてさらした牌
+  score: number;           // 現在の点数
+  isDealer: boolean;       // 親かどうか
+  seatWind: Wind;          // 自風（その席の風）
   isRiichi: boolean;       // リーチ中かどうか
   kitaCount: number;       // 三麻の北抜き枚数（4麻では常に0）
 }
 
 // ゲーム全体の状態のうち「自分が見ていい部分」をまとめた型
 export interface GameView {
-  phase: GamePhase;
-  round: Wind;
-  roundNumber: number;
-  honbaCount: number;
-  riichiSticks: number;                              // 場に出ている供託リーチ棒の数
-  dealer: number;
-  currentTurn: number;
-  wallCount: number;
-  doraIndicators: Tile[];
+  phase: GamePhase;        // 今どの局面か
+  round: Wind;             // 場風（東場・南場など）
+  roundNumber: number;     // 局数（東1局なら1）
+  honbaCount: number;      // 本場の数（連荘・流局で積まれる）
+  riichiSticks: number;    // 場に出ている供託リーチ棒の数
+  dealer: number;          // 親の席番号
+  currentTurn: number;     // 今が手番の席番号
+  wallCount: number;       // 山に残っている牌の数
+  doraIndicators: Tile[];  // ドラ表示牌（公開されている表ドラの目印）
+  // 直前の捨て牌。鳴きやロンの判定に使う。まだ無い場面もあるので省略可能(`?`)。
   lastDiscard?: { tile: Tile; seat: number };
-  players: PlayerView[];
-  myHand: Tile[];
-  mySeat: number;
+  players: PlayerView[];   // 全プレイヤーの公開情報
+  myHand: Tile[];          // 自分の手牌（このビューを受け取る本人の分だけ）
+  mySeat: number;          // 自分の席番号
   availableClaims?: Array<'chi' | 'pon' | 'kan' | 'ron'>;
   chiCombinations?: [string, string][];
   canRiichi?: boolean;                               // 自分がリーチ宣言可能か
@@ -86,37 +98,45 @@ export interface GameView {
   kakanOptions?: string[];                           // 加槓できる手牌のID
 }
 
-// 1局終了時の結果情報
+// 1局終了時の結果情報。
+// 和了か流局かで「埋まるフィールド」が変わるため、共通の isDraw 以外は省略可能(`?`)にしている。
 export interface RoundResult {
-  isDraw: boolean;
+  isDraw: boolean;                                   // 流局かどうか
   isKyushuhai?: boolean;                             // 九種九牌による流局か
-  winner?: number;
-  losers?: number[];
-  winTile?: Tile;
-  winType?: 'tsumo' | 'ron';
-  handTiles?: Tile[];
-  melds?: Meld[];
+  winner?: number;                                   // 和了した席（流局なら無し）
+  losers?: number[];                                 // 失点した席（放銃者やツモられた側）
+  winTile?: Tile;                                    // 和了牌
+  winType?: 'tsumo' | 'ron';                         // ツモかロンか
+  handTiles?: Tile[];                                // 和了者の手牌（結果表示用に公開）
+  melds?: Meld[];                                    // 和了者の鳴き
   yakuList?: YakuInfo[];                             // 成立した役
   totalHan?: number;                                 // 合計飜数
   fu?: number;                                       // 符
   doraIndicators?: Tile[];                           // ドラ表示牌
   uraDoraIndicators?: Tile[];                        // 裏ドラ表示牌（リーチ和了時のみ公開）
-  scoreDelta: Record<number, number>;
-  newScores: Record<number, number>;
+  // Record<number, number> は「キーが number、値が number のオブジェクト」を表す型。
+  // ここでは「席番号 → 点数」の対応表として使う。{ 0: -8000, 1: +8000, ... } のような形。
+  scoreDelta: Record<number, number>;                // この局での増減
+  newScores: Record<number, number>;                // 精算後の各席の合計点
 }
 
 // ルーム一覧で表示する情報
 export interface RoomInfo {
-  id: string;
-  name: string;
-  maxPlayers: 3 | 4;
-  currentPlayers: number;
-  status: 'waiting' | 'playing';
+  id: string;                                        // ルームの一意なID
+  name: string;                                      // ルーム名
+  maxPlayers: 3 | 4;                                 // 3人麻雀か4人麻雀か（3か4だけ許可）
+  currentPlayers: number;                            // 現在の参加人数
+  status: 'waiting' | 'playing';                     // 待機中か対局中か
   isPrivate: boolean;                                // パスワード付き（プライベート）か
 }
 
 // --- Socket.IO のイベント型定義 ---
+// 下の各行は「イベント名: そのイベントで呼ばれる関数の形」という対応を書いている。
+// 例えば `error: (message: string) => void` は「error イベントは文字列を1つ受け取る関数」という意味。
+// `=> void` は「戻り値を使わない（返さない）」こと。
+// この型を Socket.IO に渡しておくと、emit/on のイベント名や引数を間違えたときに即わかる。
 
+// サーバー → クライアント へ送るイベント一覧
 export interface ServerToClientEvents {
   rooms: (rooms: RoomInfo[]) => void;
   'room-joined': (data: { roomId: string; seat: number; playerName: string }) => void;
@@ -131,6 +151,8 @@ export interface ServerToClientEvents {
   error: (message: string) => void;
 }
 
+// クライアント → サーバー へ送るイベント一覧。
+// callback を引数に取るものは、サーバーが処理結果を呼び出し元へ返す（応答する）ためのもの。
 export interface ClientToServerEvents {
   'get-rooms': (callback: (rooms: RoomInfo[]) => void) => void;
   'create-room': (

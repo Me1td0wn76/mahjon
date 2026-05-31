@@ -16,20 +16,25 @@ import { createTileset, shuffleTiles, sortHand, tilesEqual } from './tiles.js';
 import { checkWin, isTenpai, waitingTileKeys, getChiCombinations } from './winCheck.js';
 import { calculateScore, calcRonPayment, calcTsumoPayment } from './scoring.js';
 
-// 鳴きの判断を待つ最大時間
+// マジックナンバー（意味のある定数）は名前を付けて1か所にまとめる。
+// 値の意味が明確になり、調整するときもここだけ直せばよくなる。
+// 鳴きの判断を待つ最大時間（ミリ秒）
 const CLAIM_TIMEOUT_MS = 8000;
 // リーチ供託額
 const RIICHI_STICK = 1000;
 
-// クラス内部だけで使うプレイヤー状態
+// クラス内部だけで使うプレイヤー状態。types.ts の PlayerView と違い、
+// 手牌の中身など「本人にしか見せない秘密情報」もここに持つ（外には出さない）。
 interface PlayerState {
   socketId: string;
   name: string;
   seat: number;
-  hand: Tile[];
-  discards: Tile[];
-  melds: Meld[];
+  hand: Tile[];                            // 手牌（秘密情報）
+  discards: Tile[];                        // 捨て牌（河）
+  melds: Meld[];                           // 鳴いてさらした面子
   score: number;
+  // 鳴き確認中の返答。`?`で省略可能、`| null`で「明示的に無し」も表せる。
+  // undefined=まだ未回答、null=見送り済み、と3状態を区別するために両方使う。
   claimResponse?: ClaimRequest | null;
   isRiichi: boolean;                       // リーチ済みかどうか
   isDoubleRiichi: boolean;                 // ダブル立直（第1打でのリーチ）
@@ -40,8 +45,10 @@ interface PlayerState {
 }
 
 export class MahjongGame {
+  // `private` を付けたフィールドはクラスの外から触れない（＝内部状態を守る）。
+  // ゲームの状態はすべてここに集約し、メソッド経由でだけ変更する設計。
   private players: PlayerState[] = [];
-  private wall: Tile[] = [];
+  private wall: Tile[] = [];               // 山（ツモる牌の列）
   private phase: GamePhase = 'dealing';
   private round: Wind = 'east';
   private roundNumber = 1;
@@ -55,8 +62,10 @@ export class MahjongGame {
   private rinshanTiles: Tile[] = [];       // 嶺上牌（カンの補充ツモ用、最大4枚）
   private kanCount = 0;                     // この局で行われたカンの回数（新ドラ・嶺上牌の管理）
   private lastDiscard?: { tile: Tile; seat: number };
+  // 鳴き待ちのタイマー。`ReturnType<typeof setTimeout>` は「setTimeout が返す型」を
+  // 環境（Node/ブラウザで型が違う）に依存せず自動で表すための書き方。
   private claimTimer?: ReturnType<typeof setTimeout>;
-  private readyCount = 0;
+  private readyCount = 0;                   // 「次へ」を押した人数
   // 配牌直後だけ true。九種九牌宣言期間の管理。
   private firstGoAround = false;
   // この局で一度でも鳴き（ポン・チー・カン）があったか。ダブル立直の判定に使う。
@@ -66,6 +75,12 @@ export class MahjongGame {
   // 加槓の槍槓（チャンカン）確認待ち。ロンされなければカンが成立する。
   private pendingKakan?: { player: PlayerState; tile: Tile; pon: Meld };
 
+  // コンストラクタ引数に `private readonly` を付けると、
+  // 「同名のフィールドを作って、渡された値を自動でそこに代入」してくれる（引数プロパティ）。
+  // つまり this.playerCount などを別途宣言・代入する手間が省ける。
+  // readonly は「生成後は変更不可」。試合中に人数やコールバックが変わらないことを保証する。
+  // onStateChange / onRoundEnd / onClaimWindow は「状態が動いたときに外へ知らせる」関数。
+  // このクラス自身は通信手段を持たず、何をするかは呼び出し側に委ねている（疎結合）。
   constructor(
     private readonly playerCount: 3 | 4,
     players: { socketId: string; name: string; seat: number }[],
@@ -78,6 +93,8 @@ export class MahjongGame {
       chiCombos: [string, string][]
     ) => void
   ) {
+    // 受け取った最小限の情報(p)に、ゲーム用の初期状態を足して PlayerState を作る。
+    // `...p` はスプレッド構文で「p の各プロパティをそのまま展開してコピー」する書き方。
     this.players = players.map(p => ({
       ...p,
       hand: [],
@@ -102,6 +119,8 @@ export class MahjongGame {
       this.claimTimer = undefined;
     }
 
+    // 全牌を作ってシャッフルし、末尾14枚を王牌（使わずに取り分ける牌）として切り離す。
+    // slice(-14) は「末尾から14枚」、slice(0, -14) は「末尾14枚を除いた残り全部」。
     const allTiles = shuffleTiles(createTileset(this.playerCount));
     const deadWall = allTiles.slice(-14);
     this.wall = allTiles.slice(0, -14);
@@ -129,7 +148,11 @@ export class MahjongGame {
       p.kitaCount = 0;
     }
 
-    // 親から順番に13枚ずつ配る
+    // 親から順番に13枚ずつ配る。外側ループ=配る周回、内側ループ=各プレイヤー。
+    // `(this.dealer + offset) % this.playerCount` の `%`（剰余）は席を輪のように回す定番技。
+    //   例: 4人で親が2なら 2,3,0,1 の順に席が回る（人数を超えたら0に戻る）。
+    // `this.wall.shift()` は山の先頭を1枚取り出す。末尾の `!` は
+    //   「ここでは必ず牌がある」と TS に断言する非nullアサーション（配る分は確保済みのため安全）。
     for (let i = 0; i < 13; i++) {
       for (let offset = 0; offset < this.playerCount; offset++) {
         const seat = (this.dealer + offset) % this.playerCount;
@@ -141,8 +164,10 @@ export class MahjongGame {
       p.hand = sortHand(p.hand);
     }
 
+    // 最初の手番は親。親だけ第1ツモにあたる14枚目を引いてスタートする。
     this.currentTurn = this.dealer;
     const extraTile = this.wall.shift();
+    // shift() は山が空だと undefined を返すので、if で存在を確認してから扱う。
     if (extraTile) {
       this.players[this.dealer].hand.push(extraTile);
       this.players[this.dealer].hand = sortHand(this.players[this.dealer].hand);
@@ -157,6 +182,8 @@ export class MahjongGame {
     this.onStateChange();
   }
 
+  // 指定した席が山から1枚ツモる。山が尽きていれば流局処理へ。
+  // 戻り値の boolean で「ツモできたか（＝局が続くか）」を呼び出し側に伝える。
   private drawForPlayer(seat: number): boolean {
     if (this.wall.length === 0) {
       this.handleExhaustedWall();
@@ -165,6 +192,7 @@ export class MahjongGame {
     const tile = this.wall.shift()!;
     this.players[seat].hand.push(tile);
     this.players[seat].hand = sortHand(this.players[seat].hand);
+    // 直前にツモった牌を覚えておく。リーチ後の「ツモ切りしか許さない」判定に使う。
     this.players[seat].lastDrawnTileId = tile.id;
     return true;
   }
@@ -184,6 +212,8 @@ export class MahjongGame {
       return;
     }
 
+    // findIndex は条件に合う要素の位置（0始まり）を返し、無ければ -1。
+    // 手元に無い牌IDが送られてきた不正操作はここで弾く。
     const idx = player.hand.findIndex(t => t.id === tileId);
     if (idx === -1) return;
 
@@ -195,6 +225,8 @@ export class MahjongGame {
     // 嶺上開花の権利は、補充ツモ後に打牌（＝ツモらず捨てた）時点で消滅する。
     player.rinshanEligible = false;
 
+    // splice(idx, 1) は idx の位置から1個取り除き、取り除いた要素の配列を返す。
+    // その先頭 [0] が捨てる牌。これで手牌から抜きつつ捨て牌を取得している。
     const tile = player.hand.splice(idx, 1)[0];
     player.discards.push(tile);
     this.lastDiscard = { tile, seat: player.seat };
@@ -273,7 +305,7 @@ export class MahjongGame {
     if (player.melds.length > 0) return;
     if (!this.checkKyushuhai(player.hand)) return;
 
-    // 親流れ無しの流局
+    // 親流れ無しの流局。点の増減は全員0なので、各席に0を入れた表を作る。
     const scoreDelta: Record<number, number> = {};
     for (const p of this.players) scoreDelta[p.seat] = 0;
 
@@ -282,6 +314,8 @@ export class MahjongGame {
       isDraw: true,
       isKyushuhai: true,
       scoreDelta,
+      // Object.fromEntries は [キー, 値] の配列の配列を1つのオブジェクトに変換する。
+      // ここでは [[席, 点], ...] を { 席: 点, ... } という点数表にしている。
       newScores: Object.fromEntries(this.players.map(p => [p.seat, p.score])),
     });
   }
@@ -297,35 +331,44 @@ export class MahjongGame {
     return set.size >= 9;
   }
 
+  // 捨て牌に対する鳴き／ロンの受付窓を開く。ronOnly=true は槍槓確認（ロンだけ受け付ける）。
   private startClaimWindow(ronOnly = false): void {
     if (!this.lastDiscard) return;
 
+    // 分割代入でフィールドを取り出しつつ、`tile: discardTile` のように別名を付けている。
     const { tile: discardTile, seat: discardSeat } = this.lastDiscard;
-    const deadline = Date.now() + CLAIM_TIMEOUT_MS;
+    const deadline = Date.now() + CLAIM_TIMEOUT_MS;   // 締め切り時刻（現在時刻＋制限時間）
 
+    // いったん全員の返答を「未回答(undefined)」に戻す。
     for (const p of this.players) {
       p.claimResponse = undefined;
     }
+    // 捨てた本人は鳴き対象外なので、最初から「見送り(null)」にしておく。
     this.players.find(p => p.seat === discardSeat)!.claimResponse = null;
 
+    // 鳴ける人が1人でもいるか。誰も鳴けなければ待たずに次へ進める。
     let anyPending = false;
     for (const p of this.players) {
-      if (p.seat === discardSeat) continue;
+      if (p.seat === discardSeat) continue;            // 本人はスキップ
       const available = this.getAvailableClaims(p.seat, discardTile, discardSeat, ronOnly);
       const chiCombos = ronOnly ? [] : getChiCombinations(p.hand, discardTile);
       if (available.length > 0) {
         anyPending = true;
+        // この人に「こういう選択肢があるよ」と通知し、返答を待つ。
         this.onClaimWindow(p.seat, deadline, available, chiCombos);
       } else {
-        p.claimResponse = null;
+        p.claimResponse = null;                        // 鳴けない人は自動で見送り
       }
     }
 
+    // 誰も待つ必要が無い／全員すでに返答済みなら、すぐ集計へ。
     if (!anyPending || this.players.every(p => p.claimResponse !== undefined)) {
       this.processClaims();
       return;
     }
 
+    // 制限時間が来たら、未回答の人を見送り扱いにして強制的に集計する。
+    // setTimeout に渡すアロー関数は `this` を囲みの this のまま保つので、ここで this.〜 が使える。
     this.claimTimer = setTimeout(() => {
       for (const p of this.players) {
         if (p.claimResponse === undefined) p.claimResponse = null;
@@ -343,6 +386,7 @@ export class MahjongGame {
     const player = this.players.find(p => p.seat === seat)!;
     const result: Array<'chi' | 'pon' | 'kan' | 'ron'> = [];
 
+    // まずロン可能か（この牌で和了形になるか）を判定。
     if (checkWin(player.hand, player.melds, tile).isWin) result.push('ron');
 
     // 槍槓（チャンカン）の確認窓ではロンのみ受け付ける
@@ -366,12 +410,15 @@ export class MahjongGame {
     return result;
   }
 
+  // クライアントから届いた鳴き／見送りの返答を記録する。
   handleClaim(socketId: string, claim: ClaimRequest): void {
     const player = this.players.find(p => p.socketId === socketId);
+    // 鳴き受付中でない／二重回答は無視（claimResponse が undefined のときだけ受け付ける）。
     if (!player || this.phase !== 'claiming' || player.claimResponse !== undefined) return;
 
     player.claimResponse = claim;
 
+    // 全員の返答が出そろったら、待たずに即集計する（every=全要素が条件を満たすか）。
     if (this.players.every(p => p.claimResponse !== undefined)) {
       if (this.claimTimer) {
         clearTimeout(this.claimTimer);
@@ -398,6 +445,9 @@ export class MahjongGame {
       return;
     }
 
+    // ここからは麻雀の優先順位どおりに判定する: ロン > カン > ポン > チー。
+    // `p.claimResponse?.type` の `?.` は claimResponse が null/undefined でも安全に type を読む書き方。
+    // 優先度の高いものから探し、見つかれば処理して return（残りは無視）する。
     const ronner = this.players.find(p => p.claimResponse?.type === 'ron');
     if (ronner) {
       this.resolveRon(ronner, discardSeat);
@@ -423,6 +473,7 @@ export class MahjongGame {
       return;
     }
 
+    // 誰も鳴かなければ、捨てた人の次の席が普通にツモって続行する。
     const nextSeat = (discardSeat + 1) % this.playerCount;
     this.currentTurn = nextSeat;
     const drew = this.drawForPlayer(nextSeat);
@@ -463,15 +514,18 @@ export class MahjongGame {
       return;
     }
 
+    // 支払い額 = 基本点から計算したロン支払い + 本場ボーナス(1本場につき300点)。
     const payment = calcRonPayment(scoring.basePoint, isDealer)
       + this.honbaCount * 300;
     const loser = this.players.find(p => p.seat === loserSeat)!;
+    // 和了者は支払い額に加えて、場に積まれたリーチ棒も総取りする。
     const totalForWinner = payment + this.riichiSticks * RIICHI_STICK;
 
-    loser.score -= payment;
-    winner.score += totalForWinner;
-    this.riichiSticks = 0;
+    loser.score -= payment;             // 放銃者が支払う
+    winner.score += totalForWinner;     // 和了者が受け取る
+    this.riichiSticks = 0;              // 供託は回収済みなので0に戻す
 
+    // 表示用の増減表。まず全員0で初期化し、関係者だけ上書きする。
     const scoreDelta: Record<number, number> = {};
     for (const p of this.players) scoreDelta[p.seat] = 0;
     scoreDelta[winner.seat] = totalForWinner;
@@ -484,6 +538,7 @@ export class MahjongGame {
       losers: [loserSeat],
       winTile,
       winType: 'ron',
+      // `[...配列]` で複製を渡す。元の手牌が後で変化しても結果表示が壊れないようにするため。
       handTiles: [...winner.hand],
       melds: [...winner.melds],
       yakuList: scoring.yakuList,
@@ -681,12 +736,15 @@ export class MahjongGame {
     this.onStateChange();
   }
 
+  // ポン成立処理。手牌から同じ牌を2枚抜き、捨て牌と合わせて刻子の面子にする。
   private resolvePon(claimer: PlayerState): void {
     const discardTile = this.lastDiscard!.tile;
-    const ponTiles: Tile[] = [];
-    const newHand: Tile[] = [];
+    const ponTiles: Tile[] = [];        // ポンに使う手牌2枚
+    const newHand: Tile[] = [];         // ポン後に残る手牌
     let count = 0;
 
+    // 手牌を1枚ずつ見て、同じ牌を「2枚まで」ポン側へ、それ以外は手牌側へ振り分ける。
+    // count<2 の条件があるので、同じ牌が3枚以上あっても2枚しか取らない。
     for (const t of claimer.hand) {
       if (count < 2 && tilesEqual(t, discardTile)) {
         ponTiles.push(t);
@@ -710,7 +768,10 @@ export class MahjongGame {
     this.onStateChange();
   }
 
+  // チー成立処理。指定された手牌2枚＋捨て牌で順子を作る。
   private resolveChi(claimer: PlayerState): void {
+    // `as ClaimRequest & { type: 'chi' }` は型アサーション。ここに来る時点で必ずチーなので、
+    // chiTiles を持つ型として扱い、TS の型エラーを避けている。
     const claim = claimer.claimResponse as ClaimRequest & { type: 'chi' };
     if (!claim.chiTiles) {
       claimer.claimResponse = null;
@@ -738,6 +799,8 @@ export class MahjongGame {
     }
 
     claimer.hand = newHand;
+    // 手牌2枚＋捨て牌を数字順に並べて順子にする。
+    // sort のコールバックは「a-b が負なら a が前」というルール（昇順）。
     const meldTiles = [...chiFromHand, discardTile].sort((a, b) => a.value - b.value);
     claimer.melds.push({ type: 'chi', tiles: meldTiles, fromSeat: this.lastDiscard!.seat });
     this.removeClaimedTileFromRiver();
@@ -748,19 +811,23 @@ export class MahjongGame {
     this.onStateChange();
   }
 
+  // ツモ和了の処理。
   handleTsumo(socketId: string): void {
     const player = this.players.find(p => p.socketId === socketId);
+    // 自分の手番の打牌フェーズ（ツモ直後）でなければ無視。
     if (!player || player.seat !== this.currentTurn || this.phase !== 'discard') return;
 
+    // 手牌の各牌を「これが和了牌だったら？」と1枚ずつ仮定して和了形か調べる。
+    // `Tile | undefined` 型で初期値なし。見つからなければ undefined のまま。
     let winTile: Tile | undefined;
     for (const tile of player.hand) {
       const rest = player.hand.filter(t => t.id !== tile.id);
       if (checkWin(rest, player.melds, tile).isWin) {
         winTile = tile;
-        break;
+        break;                          // 1つ見つかれば十分なので打ち切る
       }
     }
-    if (!winTile) return;
+    if (!winTile) return;               // どう見ても和了形でなければ無効
 
     // ツモ和了用の手牌（和了牌を除いた残り）
     const closedRest = player.hand.filter(t => t.id !== winTile!.id);
@@ -787,16 +854,19 @@ export class MahjongGame {
 
     const isDealer = player.seat === this.dealer;
     const payments = calcTsumoPayment(scoring.basePoint, isDealer);
-    const honbaPay = this.honbaCount * 100;
+    const honbaPay = this.honbaCount * 100;   // ツモは1本場につき各家100点
 
     const scoreDelta: Record<number, number> = {};
-    let totalGain = 0;
+    let totalGain = 0;                  // 和了者が受け取る合計
 
+    // 和了者以外の全員から支払いを集める。
     for (const p of this.players) {
       if (p.seat === player.seat) {
         scoreDelta[p.seat] = 0;
-        continue;
+        continue;                       // 自分自身はスキップ
       }
+      // 親ツモなら全員同額。子ツモなら親だけ多く払う。
+      // 三項演算子のネストで「自分が親か」「相手が親か」を場合分けしている。
       const pay = isDealer
         ? payments.fromNonDealer + honbaPay
         : (p.seat === this.dealer ? payments.fromDealer : payments.fromNonDealer) + honbaPay;
@@ -830,7 +900,9 @@ export class MahjongGame {
     });
   }
 
+  // 山が尽きたときの流局処理（荒牌平局）。テンパイ者とノーテン者で罰符をやり取りする。
   private handleExhaustedWall(): void {
+    // テンパイの席と、そうでない（ノーテンの）席に分ける。
     const tenpaiSeats = this.players
       .filter(p => isTenpai(p.hand, p.melds))
       .map(p => p.seat);
@@ -841,6 +913,9 @@ export class MahjongGame {
     const scoreDelta: Record<number, number> = {};
     for (const p of this.players) scoreDelta[p.seat] = 0;
 
+    // 両者がいるときだけ罰符が動く（全員テンパイ／全員ノーテンなら増減なし）。
+    // 合計3000点を、テンパイ側で山分けして受け取り、ノーテン側で山分けして払う。
+    // Math.floor は小数を切り捨てる（点は整数なので端数を落とす）。
     if (tenpaiSeats.length > 0 && noshiroSeats.length > 0) {
       const perTenpai = Math.floor(3000 / tenpaiSeats.length);
       const perNoshiro = Math.floor(3000 / noshiroSeats.length);
@@ -854,6 +929,7 @@ export class MahjongGame {
       }
     }
 
+    // 親がテンパイなら連荘（本場を1つ積む）、ノーテンなら親が次へ移る。
     if (tenpaiSeats.includes(this.dealer)) {
       this.honbaCount++;
     } else {
@@ -868,6 +944,7 @@ export class MahjongGame {
     });
   }
 
+  // 結果表示後、各プレイヤーが「次へ」を押すたびに呼ばれる。全員揃ったら次局を開始。
   handleReadyNext(socketId: string): void {
     if (this.phase !== 'roundEnd') return;
     if (!this.players.find(p => p.socketId === socketId)) return;
@@ -878,20 +955,24 @@ export class MahjongGame {
     }
   }
 
+  // ロン和了後の親の進行。和了者が親でなければ親が次へ移る（親なら連荘）。
+  // roomManager 側から呼ぶので public にしている。
   advanceAfterRon(winnerSeat: number): void {
     if (winnerSeat !== this.dealer) {
       this.advanceDealer();
     }
   }
 
+  // 親を次の席へ進める。一周して親が0に戻ったら場風も次へ（東場→南場）。
   private advanceDealer(): void {
     this.dealer = (this.dealer + 1) % this.playerCount;
     if (this.dealer === 0) {
+      // 現在の場風が WINDS の何番目かを調べ、次の風へ。`%` で東→南→西→北→東と循環。
       const roundIdx = WINDS.indexOf(this.round);
       this.round = WINDS[(roundIdx + 1) % WINDS.length];
     }
     this.roundNumber++;
-    this.honbaCount = 0;
+    this.honbaCount = 0;               // 親が移ると本場はリセット
   }
 
   /**
@@ -899,12 +980,14 @@ export class MahjongGame {
    */
   getViewForPlayer(socketId: string): GameView | null {
     const me = this.players.find(p => p.socketId === socketId);
-    if (!me) return null;
+    if (!me) return null;             // この接続が参加者でなければ何も返さない
 
+    // 全員分を「公開してよい情報」だけに詰め替える。手牌は handCount（枚数）だけにして中身は隠す。
+    // これが「相手の手牌を漏らさない」ための要。秘密情報の PlayerState から安全な PlayerView へ変換する。
     const players: PlayerView[] = this.players.map(p => ({
       seat: p.seat,
       name: p.name,
-      handCount: p.hand.length,
+      handCount: p.hand.length,        // 枚数のみ
       discards: p.discards,
       melds: p.melds,
       score: p.score,
@@ -931,6 +1014,7 @@ export class MahjongGame {
     // 加槓: 既存のポンに足せる手牌のIDを返す（リーチ後は不可）
     const kakanOptions: string[] = [];
     if (myTurnDiscard) {
+      // 同じ種類の牌を二重に調べないよう、見た牌の種類を Set で記録しながら走査する。
       const seen = new Set<string>();
       for (const t of me.hand) {
         const key = `${t.suit}_${t.value}`;
@@ -987,6 +1071,7 @@ export class MahjongGame {
     };
   }
 
+  // 通常のビューに「鳴きの選択肢」を足して返す。鳴き待ちの本人へ送るとき用。
   getViewWithClaims(
     socketId: string,
     available: Array<'chi' | 'pon' | 'kan' | 'ron'>,
@@ -994,9 +1079,13 @@ export class MahjongGame {
   ): GameView | null {
     const view = this.getViewForPlayer(socketId);
     if (!view) return null;
+    // `{ ...view, 追加 }` は「view を全部コピーしつつフィールドを追加」する書き方。
+    // 元の view を壊さず、選択肢付きの新しいオブジェクトを作って返す。
     return { ...view, availableClaims: available, chiCombinations };
   }
 
+  // 外部から現在のフェーズ／人数を読むための getter。
+  // private フィールドは外から触れないので、必要な値だけメソッド経由で公開する。
   getPhase(): GamePhase {
     return this.phase;
   }

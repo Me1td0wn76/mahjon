@@ -676,8 +676,12 @@ export function calculateScore(
   seatWind: Wind,
   roundWind: Wind,
   kitaCount: number,
+  // `= {}` はデフォルト引数。呼び出し側が opts を省略しても空オブジェクトが入り、
+  // 後の分割代入で undefined にならず安全になる。
   opts: ScoreOptions = {}
 ): ScoringResult {
+  // 「分割代入＋デフォルト値」。opts の各プロパティを取り出し、無ければ false にする。
+  // opts.isIppatsu と毎回書かずに済み、未指定時の既定値も同時に決められる。
   const {
     isIppatsu = false,
     isDoubleRiichi = false,
@@ -691,6 +695,8 @@ export function calculateScore(
   // han フィールドには役満の倍数（1=単/2=ダブル）が入る。表示用には13倍して飜換算する。
   const yakuman = detectYakuman(hand, fullClosed, openMelds, winTile, isTsumo);
   if (yakuman.length > 0) {
+    // reduce は配列を1つの値に畳み込むメソッド。ここでは各役満の倍率(han)を合計している。
+    // 第2引数の 0 は合計の初期値、s は途中までの合計、y は今見ている要素。
     const mult = yakuman.reduce((s, y) => s + y.han, 0);
     return {
       yakuList: yakuman.map(y => ({ name: y.name, han: 13 * y.han })),
@@ -702,14 +708,19 @@ export function calculateScore(
 
   // ドラ・裏ドラ・北抜きの飜（分解の仕方に依存しない＝一度だけ計算）。
   // ただしこれ自体は役ではないので、本来の役がある時だけ後で加算する。
+  // flatMap は「map した結果の配列をさらに1段平らに展開」するメソッド。
+  // 各鳴き(m)が持つ tiles 配列（配列の配列）を、1本の牌の配列にまとめている。
   const allFinalTiles = [...fullClosed, ...openMelds.flatMap(m => m.tiles)];
   const doraHan = countDora(allFinalTiles, opts.doraIndicators ?? []);
   const uraHan = isRiichi ? countDora(allFinalTiles, opts.uraDoraIndicators ?? []) : 0;
 
   // 候補の中から「点数（基本点）が最大」になる組み合わせを採用する（高点法）。
+  // 関数の中で型を宣言することもできる。ここでしか使わないので局所的に定義している。
   interface Candidate { yakuList: Yaku[]; han: number; fu: number; basePoint: number }
-  let best: Candidate | null = null;
+  let best: Candidate | null = null;       // まだ候補が無い状態を null で表す
 
+  // consider は「1つの候補を受け取り、今までで最高なら best を更新する」関数。
+  // アロー関数を変数に入れているので、下のループから何度も呼び出せる（内部関数）。
   const consider = (yakuList: Yaku[], fu: number) => {
     const yakuHan = yakuList.reduce((s, y) => s + y.han, 0);
     if (yakuHan <= 0) return;                         // 役が無ければ和了不可
@@ -750,7 +761,10 @@ export function calculateScore(
     consider(yaku, fu);
   }
 
+  // best はループ内で更新されるが、TS の型推論では「null のまま」と判断されることがある。
+  // 実際には Candidate が入り得るので、`as` で型を明示し直してから使う。
   const result = best as Candidate | null;
+  // 役なし（result が null）なら和了不可。0点の結果を返す。
   if (!result) return { yakuList: [], totalHan: 0, fu: 0, basePoint: 0 };
   return { yakuList: result.yakuList, totalHan: result.han, fu: result.fu, basePoint: result.basePoint };
 }

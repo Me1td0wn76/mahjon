@@ -99,7 +99,9 @@ function isStandardWin(fullClosedHand: Tile[], openMeldCount: number): boolean {
 
 /** 和了判定の結果を返す型。 */
 export interface WinResult {
-  isWin: boolean;
+  isWin: boolean;          // 和了できるか
+  // 七対子で和了したか。符・役の計算で扱いが特殊なため別途持っておく。
+  // 七対子でないときは存在しなくてよいので省略可能(`?`)にしている。
   isChiitoitsu?: boolean;
 }
 
@@ -127,13 +129,18 @@ export function checkWin(closedHand: Tile[], openMelds: Meld[], winTile: Tile): 
  * すべての牌の種類を1枚ずつ「もしこの牌が来たら？」と試して、和了できる種類を集める。
  */
 export function waitingTileKeys(closedHand: Tile[], openMelds: Meld[]): Set<string> {
+  // Set は「重複しない値の集合」。同じ待ち牌を二重に数えないために使う。
   const keys = new Set<string>();
+  // 試す牌の一覧を作る。`Tile['suit']` は Tile 型の suit フィールドの型を取り出す書き方。
   const testTiles: { suit: Tile['suit']; value: number }[] = [];
+  // `as const` を付けると配列が「ただの string[]」ではなく
+  // 'man'|'pin'|'sou' という具体的な値の型として扱われ、suit にそのまま代入できる。
   for (const suit of ['man', 'pin', 'sou'] as const) {
     for (let v = 1; v <= 9; v++) testTiles.push({ suit, value: v });
   }
   for (let v = 1; v <= 7; v++) testTiles.push({ suit: 'honor', value: v });
 
+  // 1種類ずつ「この牌が来たら和了か？」を試し、和了できる牌だけを集める。
   for (const tt of testTiles) {
     if (checkWin(closedHand, openMelds, { id: 'test', suit: tt.suit, value: tt.value }).isWin) {
       keys.add(`${tt.suit}_${tt.value}`);

@@ -3,32 +3,42 @@
 import { MahjongGame } from './game/MahjongGame.js';
 import { RoomInfo, ClaimRequest, RoundResult } from './types.js';
 
+// ルームに参加している1人分の情報。
 interface RoomPlayer {
-  socketId: string;
-  name: string;
-  seat: number;
+  socketId: string;        // その人の接続ID（Socket.IO が割り振る）
+  name: string;            // プレイヤー名
+  seat: number;            // 席番号（0始まり）
 }
 
+// 1つのルームの情報。
 interface Room {
   id: string;
   name: string;
   maxPlayers: 3 | 4;
   players: RoomPlayer[];
   status: 'waiting' | 'playing';
+  // 対局が始まると麻雀ゲーム本体を持つ。開始前は存在しないので省略可能(`?`)。
   game?: MahjongGame;
   password?: string;                                 // パスワード（プライベートルーム用）
 }
 
+// 「特定の人へイベントを送る関数」の型。index.ts から実物を注入してもらう（依存性の注入）。
+// `...args: unknown[]` は「型が事前にわからない引数を何個でも受け取る」という意味。
 type EmitFn = (socketId: string, event: string, ...args: unknown[]) => void;
 
+// 初期値は「何もしない関数」。注入される前に呼ばれてもエラーにならないようにするため。
 let emitFn: EmitFn = () => {};
 
+// index.ts から本物の送信関数を受け取って差し替える。
 export function setEmitFn(fn: EmitFn): void {
   emitFn = fn;
 }
 
+// 全ルームを「ルームID → ルーム」で保持する。Map は配列より、IDでの取り出し・削除が速くて分かりやすい。
 const rooms = new Map<string, Room>();
 
+// ルームIDを生成する。乱数を36進数(0-9,a-z)の文字列にして6文字だけ切り出し、大文字化している。
+// 例: "A1B2C3"。短くて入力しやすいIDが欲しいだけなので、厳密な一意性までは保証していない。
 function genId(): string {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
 }
@@ -37,14 +47,17 @@ function genId(): string {
  * 待機中ルーム一覧を返す（パスワード自体は隠して、有無だけ伝える）。
  */
 export function getRoomList(): RoomInfo[] {
+  // Map の値を配列にしてから、メソッドチェーンで絞り込み＆形を整える。
   return Array.from(rooms.values())
-    .filter(r => r.status === 'waiting')
-    .map(r => ({
+    .filter(r => r.status === 'waiting')   // まだ始まっていない＝参加できる部屋だけ残す
+    .map(r => ({                           // クライアントに見せてよい形に詰め替える
       id: r.id,
       name: r.name,
       maxPlayers: r.maxPlayers,
       currentPlayers: r.players.length,
       status: r.status,
+      // `!!` は値を真偽値に変換する書き方。password があれば true、無ければ false。
+      // パスワードそのものは送らず「鍵付きか否か」だけ伝えることで漏洩を防ぐ。
       isPrivate: !!r.password,
     }));
 }
@@ -60,12 +73,15 @@ export function createRoom(
   password?: string
 ): { success: boolean; roomId?: string; error?: string } {
   const roomId = genId();
+  // Map に新しいルームを登録する。作った本人は seat: 0（最初の席）で参加扱い。
   rooms.set(roomId, {
     id: roomId,
     name: roomName,
     maxPlayers,
     players: [{ socketId, name: playerName, seat: 0 }],
     status: 'waiting',
+    // パスワードが「空白だけ」や未入力なら undefined（＝鍵なし）にそろえる。
+    // .trim() で前後の空白を除き、空文字を誤って有効なパスワードにしないため。
     password: password && password.trim() ? password.trim() : undefined,
   });
   return { success: true, roomId };
@@ -81,9 +97,12 @@ export function joinRoom(
   password?: string
 ): { success: boolean; seat?: number; error?: string } {
   const room = rooms.get(roomId);
+  // 参加できない条件を先にひとつずつ弾く（早期リターン）。
+  // こうすると「ここまで来たら参加できる」と後続が読みやすくなる。
   if (!room) return { success: false, error: 'ルームが見つかりません' };
   if (room.status === 'playing') return { success: false, error: 'ゲームが既に始まっています' };
   if (room.players.length >= room.maxPlayers) return { success: false, error: 'ルームが満員です' };
+  // some は「条件に合う要素が1つでもあれば true」。同名プレイヤーがいれば弾く。
   if (room.players.some(p => p.name === playerName)) {
     return { success: false, error: 'その名前は既に使われています' };
   }
@@ -94,18 +113,24 @@ export function joinRoom(
     }
   }
 
+  // 新しい席番号は「今の人数」。0,1,2... と詰めて割り当たる。
   const seat = room.players.length;
   room.players.push({ socketId, name: playerName, seat });
   return { success: true, seat };
 }
 
+// 接続IDから、その人が入っているルームを探す。
+// 戻り値の型 `Room | undefined` は「見つかればRoom、無ければundefined」を意味する。
+// find は条件に合う最初の要素を返し、無ければ undefined を返す。
 export function getRoomBySocketId(socketId: string): Room | undefined {
   return Array.from(rooms.values()).find(r => r.players.some(p => p.socketId === socketId));
 }
 
+// ルーム内の全員に、各自専用のゲーム状態（手牌が違う）を送る。
 function broadcastGameUpdate(room: Room): void {
-  if (!room.game) return;
+  if (!room.game) return;                 // ゲーム未開始なら何もしない
   for (const p of room.players) {
+    // getViewForPlayer は「その人が見てよい情報だけ」を作る。人ごとに手牌が違うので個別送信。
     const view = room.game.getViewForPlayer(p.socketId);
     if (view) emitFn(p.socketId, 'game-update', view);
   }
@@ -120,13 +145,20 @@ export function startGame(socketId: string): boolean {
   if (room.players.length !== room.maxPlayers) return false;
 
   room.status = 'playing';
+  // 麻雀ゲーム本体を作る。MahjongGame は通信方法を知らないので、
+  // 「状態が変わったら何をするか」を3つのコールバック関数で受け取る形にしている（疎結合）。
   room.game = new MahjongGame(
     room.maxPlayers,
     room.players,
+    // (1) 局面が更新されたとき: 全員に最新状態を配信する
     () => {
       broadcastGameUpdate(room);
     },
+    // (2) 局が終わったとき: 結果を全員へ送る
     (result: RoundResult) => {
+      // ロン和了なら、和了者基準で次局へ進める。
+      // `room.game!` の `!` は「ここでは必ず存在する」と TS に断言する書き方（非nullアサーション）。
+      // 直前で room.game を代入済みなので安全だが、TS には省略可能(`?`)に見えるため明示する。
       if (!result.isDraw && result.winner !== undefined) {
         room.game!.advanceAfterRon(result.winner);
       }
@@ -134,9 +166,10 @@ export function startGame(socketId: string): boolean {
         emitFn(p.socketId, 'round-end', result);
       }
     },
+    // (3) 誰かが鳴き／ロンを宣言できる状況になったとき: その人だけに選択肢付きの状態を送る
     (
       seat: number,
-      _deadline: number,
+      _deadline: number,                                 // 使わない引数なので `_` 始まり
       available: Array<'chi' | 'pon' | 'kan' | 'ron'>,
       chiCombos: [string, string][]
     ) => {
@@ -147,11 +180,16 @@ export function startGame(socketId: string): boolean {
     }
   );
 
-  room.game.startRound();
+  room.game.startRound();        // 最初の局を開始
   return true;
 }
 
 // --- ゲーム中操作の取り次ぎ ---
+// 以下はどれも「その人のルームのゲームへ操作を渡すだけ」の薄い関数。
+// `?.`（オプショナルチェーン）は「左が null/undefined なら、その先を呼ばず undefined を返す」記法。
+// `getRoomBySocketId(...)?.game?.handleDiscard(...)` は
+// 「ルームがあって、かつゲームが始まっていれば handleDiscard を呼ぶ」を1行で安全に書いている。
+// ルームやゲームが無い不正なタイミングの操作でもクラッシュしない。
 
 export function handleDiscard(socketId: string, tileId: string): void {
   getRoomBySocketId(socketId)?.game?.handleDiscard(socketId, tileId);
@@ -189,18 +227,23 @@ export function handleReadyNext(socketId: string): void {
   getRoomBySocketId(socketId)?.game?.handleReadyNext(socketId);
 }
 
+// 切断時の後始末。ここでは「対局前（waiting）」の抜けだけを扱う。
 export function handleDisconnect(socketId: string): void {
   const room = getRoomBySocketId(socketId);
   if (!room) return;
   if (room.status === 'waiting') {
+    // 抜けた本人を players から取り除く（filter は条件に合う要素だけ残した新配列を返す）。
     room.players = room.players.filter(p => p.socketId !== socketId);
     if (room.players.length === 0) {
+      // 誰もいなくなったルームは残しても無駄なので削除する。
       rooms.delete(room.id);
     } else {
+      // 席番号に欠番ができないよう、残った人を前から 0,1,2... と振り直す。
       room.players.forEach((p, i) => {
         p.seat = i;
       });
     }
+    // 残ったメンバーに「メンバーが変わった」最新状態を通知する。
     for (const p of room.players) {
       emitFn(p.socketId, 'room-update', {
         players: room.players.map(pl => ({ name: pl.name, seat: pl.seat })),
@@ -211,6 +254,9 @@ export function handleDisconnect(socketId: string): void {
   }
 }
 
+// あるルームの参加者一覧（名前と席だけ）を返す。
+// `room?....` でルームが無ければ式全体が undefined になり、`?? []` で空配列に置き換える。
+// これで「ルームが無い場合は空配列」を1行で安全に返せる。
 export function getRoomPlayers(socketId: string): { name: string; seat: number }[] {
   const room = getRoomBySocketId(socketId);
   return room?.players.map(p => ({ name: p.name, seat: p.seat })) ?? [];
