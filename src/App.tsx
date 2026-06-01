@@ -1,6 +1,5 @@
 // このファイルは画面全体のルーティング（画面遷移）を管理する React コンポーネント。
 // 「ロビー → 待機室 → ゲーム画面」の3つの画面を状態に応じて切り替える。
-import { useState } from "react";
 import { useSocket } from "./hooks/useSocket";
 import { Lobby } from "./components/Lobby";
 import { WaitingRoom } from "./components/WaitingRoom";
@@ -63,17 +62,19 @@ function Game() {
     clearError,
   } = useSocket();
 
-  // 現在表示中の画面。useState はReactの「再レンダリングできる変数」を作る仕組み。
-  const [screen, setScreen] = useState<Screen>("lobby");
-
-  // 状態変化に応じて自動で画面遷移を進める。
-  // ※注意: 本来 useEffect の中で setState すべきだが、簡略化のため直接呼んでいる。
-  // gameView があれば（再接続で対局中に復帰した場合も含め）ゲーム画面、
-  // それ以外で部屋に居れば待機室、というように状態から画面を決める。
-  if (state.gameView && screen !== "game") setScreen("game");
-  else if (state.joinedRoomId && !state.gameView && screen === "lobby") setScreen("waiting");
-  // 部屋から抜けたらロビーに戻す。
-  if (!state.joinedRoomId && screen !== "lobby") setScreen("lobby");
+  // 表示する画面は「状態から計算するだけ」にする（派生値）。
+  // 以前はレンダリング中に setScreen を呼んでいたが、再接続の途中で
+  // gameView だけ先に届き joinedRoomId がまだ null、という瞬間に
+  // 「game にする」「lobby に戻す」が交互に発火して無限再レンダリング
+  // （React error #301）になっていた。状態から一意に導出すれば起きない。
+  //   - gameView があればゲーム画面（再接続で対局中に復帰した場合も含む）
+  //   - 部屋に居れば待機室
+  //   - どちらでもなければロビー
+  const screen: Screen = state.gameView
+    ? "game"
+    : state.joinedRoomId
+      ? "waiting"
+      : "lobby";
 
   // リロード直後の自動復帰中はローディングを出して、ロビー画面のちらつきを防ぐ。
   if (state.reconnecting) {
@@ -133,6 +134,7 @@ function Game() {
             onKakan={declareKakan}
             onKita={declareKita}
             onKyushuhai={declareKyushuhai}
+            onLeave={leaveRoom}
           />
           {/* 局終了時のモーダル（あるときだけ表示） */}
           {state.roundResult && (

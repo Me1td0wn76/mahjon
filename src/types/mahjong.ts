@@ -68,6 +68,7 @@ export interface GameView {
   players: PlayerView[];
   myHand: Tile[];
   mySeat: number;
+  drawnTileId?: string;                                      // ツモ牌のID（手牌の右端に分けて表示）
   availableClaims?: Array<'chi' | 'pon' | 'kan' | 'ron'>;    // 鳴きの選択肢（あれば）
   chiCombinations?: [string, string][];                      // チーの可能パターン
   canRiichi?: boolean;                                       // リーチ可能か

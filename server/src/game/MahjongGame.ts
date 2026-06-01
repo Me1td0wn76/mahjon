@@ -41,6 +41,10 @@ interface PlayerState {
   ippatsuEligible: boolean;                // 一発の権利が残っているか
   rinshanEligible: boolean;                // 次の和了が嶺上開花になり得るか（カン直後）
   lastDrawnTileId?: string;                // 直前にツモった牌のID（リーチ後のツモ切り判定用）
+  // 今まさに手牌に浮いている「ツモ牌」のID。手牌の一番右に分けて表示するために使う。
+  // 山/嶺上から引いた・北抜きで補充した時に設定し、打牌や鳴き(ツモ無し)で解除する。
+  // lastDrawnTileId と違い、打牌するとクリアされる点が異なる。
+  drawnTileId?: string;
   kitaCount: number;                       // 三麻の北抜き枚数
 }
 
@@ -145,6 +149,7 @@ export class MahjongGame {
       p.ippatsuEligible = false;
       p.rinshanEligible = false;
       p.lastDrawnTileId = undefined;
+      p.drawnTileId = undefined;
       p.kitaCount = 0;
     }
 
@@ -172,6 +177,7 @@ export class MahjongGame {
       this.players[this.dealer].hand.push(extraTile);
       this.players[this.dealer].hand = sortHand(this.players[this.dealer].hand);
       this.players[this.dealer].lastDrawnTileId = extraTile.id;
+      this.players[this.dealer].drawnTileId = extraTile.id;
     }
 
     // 配牌直後は九種九牌宣言の余地あり
@@ -194,6 +200,8 @@ export class MahjongGame {
     this.players[seat].hand = sortHand(this.players[seat].hand);
     // 直前にツモった牌を覚えておく。リーチ後の「ツモ切りしか許さない」判定に使う。
     this.players[seat].lastDrawnTileId = tile.id;
+    // 手牌の一番右に分けて表示する「ツモ牌」として記録する。
+    this.players[seat].drawnTileId = tile.id;
     return true;
   }
 
@@ -230,6 +238,8 @@ export class MahjongGame {
     const tile = player.hand.splice(idx, 1)[0];
     player.discards.push(tile);
     this.lastDiscard = { tile, seat: player.seat };
+    // 打牌したのでツモ牌の浮き表示は解除する。
+    player.drawnTileId = undefined;
     // 誰かが打牌したら、その時点で「一巡目」は終了（九種九牌は宣言できなくなる）
     this.firstGoAround = false;
     this.phase = 'claiming';
@@ -292,6 +302,9 @@ export class MahjongGame {
     const tile = this.wall.shift()!;
     player.hand.push(tile);
     player.hand = sortHand(player.hand);
+    // 北抜きの補充牌も、手牌右端の「ツモ牌」として表示する。
+    player.lastDrawnTileId = tile.id;
+    player.drawnTileId = tile.id;
     this.onStateChange();
   }
 
@@ -580,6 +593,30 @@ export class MahjongGame {
   }
 
   /**
+   * 今リーチを宣言できるか。
+   * 重要: 手番のプレイヤーはツモ後で手牌が14枚ある。isTenpai は「あと1枚でアガれる
+   * 13枚」を前提とするため14枚に直接かけると常に false になる。そこで
+   * 「1枚切ってテンパイになる打牌が1つでもあるか」で判定する。
+   */
+  private canDeclareRiichi(player: PlayerState): boolean {
+    if (player.isRiichi) return false;
+    if (!this.isMenzen(player)) return false;          // 門前限定（暗槓は門前を維持）
+    if (player.score < RIICHI_STICK) return false;     // 供託1000点が必要
+    if (this.wall.length < 4) return false;            // 残り山が4枚未満なら不可
+
+    // 同じ種類・数字の牌は何度試しても結果が同じなので、一度だけ調べる。
+    const tried = new Set<string>();
+    for (const t of player.hand) {
+      const key = `${t.suit}_${t.value}`;
+      if (tried.has(key)) continue;
+      tried.add(key);
+      const rest = player.hand.filter(x => x.id !== t.id);
+      if (isTenpai(rest, player.melds)) return true;
+    }
+    return false;
+  }
+
+  /**
    * カン成立時に新しいドラ（と裏ドラ）表示牌を1組めくる。最大4回まで。
    */
   private revealNewKanDora(): void {
@@ -603,6 +640,8 @@ export class MahjongGame {
     player.hand.push(tile);
     player.hand = sortHand(player.hand);
     player.lastDrawnTileId = tile.id;
+    // 嶺上牌も手牌右端の「ツモ牌」として表示する。
+    player.drawnTileId = tile.id;
     player.rinshanEligible = true;        // 次のツモ和了は嶺上開花
     return true;
   }
@@ -763,6 +802,8 @@ export class MahjongGame {
     this.removeClaimedTileFromRiver();
     this.onCallMade();
 
+    // ポンは山からツモらないので、浮いた「ツモ牌」表示は無し。
+    claimer.drawnTileId = undefined;
     this.currentTurn = claimer.seat;
     this.phase = 'discard';
     this.onStateChange();
@@ -806,6 +847,8 @@ export class MahjongGame {
     this.removeClaimedTileFromRiver();
     this.onCallMade();
 
+    // チーも山からツモらないので、浮いた「ツモ牌」表示は無し。
+    claimer.drawnTileId = undefined;
     this.currentTurn = claimer.seat;
     this.phase = 'discard';
     this.onStateChange();
@@ -817,14 +860,24 @@ export class MahjongGame {
     // 自分の手番の打牌フェーズ（ツモ直後）でなければ無視。
     if (!player || player.seat !== this.currentTurn || this.phase !== 'discard') return;
 
-    // 手牌の各牌を「これが和了牌だったら？」と1枚ずつ仮定して和了形か調べる。
-    // `Tile | undefined` 型で初期値なし。見つからなければ undefined のまま。
+    // ツモ和了の和了牌は「直前にツモった牌」そのもの。
+    // 手牌を総当たりで探すと、和了形が複数の分解を持つ場合に
+    // 実際に引いた牌とは別の牌が選ばれてしまう（例: 4索でツモなのに1筒と表示）。
+    // そこでまずツモ牌を和了牌として検証し、それで和了できるかを確認する。
     let winTile: Tile | undefined;
-    for (const tile of player.hand) {
-      const rest = player.hand.filter(t => t.id !== tile.id);
-      if (checkWin(rest, player.melds, tile).isWin) {
-        winTile = tile;
-        break;                          // 1つ見つかれば十分なので打ち切る
+    const drawn = player.hand.find(t => t.id === player.lastDrawnTileId);
+    if (drawn) {
+      const rest = player.hand.filter(t => t.id !== drawn.id);
+      if (checkWin(rest, player.melds, drawn).isWin) winTile = drawn;
+    }
+    // フォールバック: ツモ牌が特定できない異常時のみ、総当たりで和了牌を探す。
+    if (!winTile) {
+      for (const tile of player.hand) {
+        const rest = player.hand.filter(t => t.id !== tile.id);
+        if (checkWin(rest, player.melds, tile).isWin) {
+          winTile = tile;
+          break;
+        }
       }
     }
     if (!winTile) return;               // どう見ても和了形でなければ無効
@@ -997,15 +1050,11 @@ export class MahjongGame {
       kitaCount: p.kitaCount,
     }));
 
-    // 自分が今リーチ宣言可能かを判定（暗槓のみなら門前を維持）
+    // 自分が今リーチ宣言可能かを判定（門前・点数・残り山・打牌でテンパイ維持できるか）
     const canRiichi =
       me.seat === this.currentTurn &&
       this.phase === 'discard' &&
-      !me.isRiichi &&
-      this.isMenzen(me) &&
-      me.score >= RIICHI_STICK &&
-      this.wall.length >= 4 &&
-      isTenpai(me.hand, me.melds);
+      this.canDeclareRiichi(me);
 
     // カン可能か（自分の手番・打牌フェーズ）
     const myTurnDiscard = me.seat === this.currentTurn && this.phase === 'discard';
@@ -1063,6 +1112,8 @@ export class MahjongGame {
       players,
       myHand: me.hand,
       mySeat: me.seat,
+      // ツモ牌のID（手牌の一番右に分けて表示する用）。打牌・鳴き後は undefined。
+      drawnTileId: me.drawnTileId,
       canRiichi,
       canKita,
       canKyushuhai,

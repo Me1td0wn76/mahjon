@@ -221,6 +221,7 @@ interface Props {
   onKakan?: (tileId: string) => void;
   onKita?: () => void;
   onKyushuhai?: () => void;
+  onLeave?: () => void;                 // 対局から退出してロビーへ戻る
 }
 
 export const GameBoard: React.FC<Props> = ({
@@ -233,6 +234,7 @@ export const GameBoard: React.FC<Props> = ({
   onKakan,
   onKita,
   onKyushuhai,
+  onLeave,
 }) => {
   // 牌のクリック1回目で「選択中」にし、2回目で確定して捨てる。
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -262,6 +264,7 @@ export const GameBoard: React.FC<Props> = ({
     canKyushuhai,
     ankanOptions,
     kakanOptions,
+    drawnTileId,
   } = gameView;
 
   const pc = players.length;
@@ -303,8 +306,12 @@ export const GameBoard: React.FC<Props> = ({
   // ツモ可能か（クライアント側の簡易判定。最終判定はサーバー）
   const canTsumo = isMyTurn && canTsumoCheck(myHand, me?.melds ?? []);
 
-  // 手牌が「面子の倍数+2」（=ツモった直後の14枚）の時、最後の1枚を見やすく離す
-  const drawnSeparated = isMyTurn && myHand.length % 3 === 2;
+  // ツモ牌（山/嶺上/北抜きで引いた牌）を手牌から分離し、一番右に離して表示する。
+  // サーバーは手牌をソートして送るので、引いた牌は drawnTileId で特定する。
+  // 鳴き(ポン/チー)の後など、ツモ牌が無いときは drawnTileId は未設定。
+  const drawnTile = drawnTileId ? myHand.find(t => t.id === drawnTileId) : undefined;
+  // 並べ替え済みの「手牌本体」（ツモ牌を除いた分）
+  const baseHand = drawnTile ? myHand.filter(t => t.id !== drawnTile.id) : myHand;
 
   // 待ち牌（アガリ牌）の計算。
   // 自分の手番で牌を選んでいる時は「その牌を切った後の待ち」を、
@@ -387,6 +394,17 @@ export const GameBoard: React.FC<Props> = ({
             <span className="riichi-sticks">供託 {riichiSticks}本</span>
           )}
         </div>
+        {/* 対局から退出してロビーへ戻る。確認ダイアログで誤操作を防ぐ。 */}
+        {onLeave && (
+          <button
+            className="btn-leave-game"
+            onClick={() => {
+              if (window.confirm('対局から退出してロビーに戻りますか？')) onLeave();
+            }}
+          >
+            退出
+          </button>
+        )}
       </div>
 
       {/* ── プレイヤーパネル（画面の四隅に配置） ── */}
@@ -532,19 +550,27 @@ export const GameBoard: React.FC<Props> = ({
       {/* ── 画面下部: 自分の手牌・アクション（鳴き面子は自分のパネルに表示） ── */}
       <div className="my-area">
         <div className="my-hand">
-          {myHand.map((tile, i) => (
-            // React.Fragment は <></> と同じ。key を持たせたい時にこの長い形を使う。
-            <React.Fragment key={tile.id}>
-              {/* ツモ牌だけ少し離して見せる視覚的工夫 */}
-              {drawnSeparated && i === myHand.length - 1 && <span className="hand-gap" />}
-              <TileComponent
-                tile={tile}
-                selected={selectedId === tile.id}
-                // 自分の番じゃない時は onClick を渡さない＝クリック不可
-                onClick={isMyTurn ? () => handleTileClick(tile.id) : undefined}
-              />
-            </React.Fragment>
+          {/* 手牌本体（ソート済み・ツモ牌を除く） */}
+          {baseHand.map(tile => (
+            <TileComponent
+              key={tile.id}
+              tile={tile}
+              selected={selectedId === tile.id}
+              // 自分の番じゃない時は onClick を渡さない＝クリック不可
+              onClick={isMyTurn ? () => handleTileClick(tile.id) : undefined}
+            />
           ))}
+          {/* ツモ牌は少し離して一番右に表示する */}
+          {drawnTile && (
+            <>
+              <span className="hand-gap" />
+              <TileComponent
+                tile={drawnTile}
+                selected={selectedId === drawnTile.id}
+                onClick={isMyTurn ? () => handleTileClick(drawnTile.id) : undefined}
+              />
+            </>
+          )}
           {/* 手牌の右に「待ち牌」ヘルパー（？アイコン、ホバーでアガリ牌を表示） */}
           {showWaitHelp && <WaitHelp waits={waitingTiles} note={waitNote} />}
         </div>

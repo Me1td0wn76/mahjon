@@ -92,6 +92,7 @@ export interface GameView {
   players: PlayerView[];   // 全プレイヤーの公開情報
   myHand: Tile[];          // 自分の手牌（このビューを受け取る本人の分だけ）
   mySeat: number;          // 自分の席番号
+  drawnTileId?: string;    // ツモ牌のID（手牌の一番右に分けて表示する用。無いときは省略）
   availableClaims?: Array<'chi' | 'pon' | 'kan' | 'ron'>;
   chiCombinations?: [string, string][];
   canRiichi?: boolean;                               // 自分がリーチ宣言可能か

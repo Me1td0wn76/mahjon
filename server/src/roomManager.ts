@@ -11,6 +11,9 @@ interface RoomPlayer {
   // リロードしても「同じ人」だと特定するための安定したID。
   // socketId は再接続で変わるが、token はブラウザに保存され変わらない。
   token?: string;
+  // 現在オンライン接続中か。切断で false、再接続(rejoin)で true に戻す。
+  // 対局中は席を残して再接続を待つが、全員が false になったら部屋を消す判断に使う。
+  connected: boolean;
 }
 
 // 1つのルームの情報。
@@ -82,7 +85,7 @@ export function createRoom(
     id: roomId,
     name: roomName,
     maxPlayers,
-    players: [{ socketId, name: playerName, seat: 0, token }],
+    players: [{ socketId, name: playerName, seat: 0, token, connected: true }],
     status: 'waiting',
     // パスワードが「空白だけ」や未入力なら undefined（＝鍵なし）にそろえる。
     // .trim() で前後の空白を除き、空文字を誤って有効なパスワードにしないため。
@@ -120,7 +123,7 @@ export function joinRoom(
 
   // 新しい席番号は「今の人数」。0,1,2... と詰めて割り当たる。
   const seat = room.players.length;
-  room.players.push({ socketId, name: playerName, seat, token });
+  room.players.push({ socketId, name: playerName, seat, token, connected: true });
   return { success: true, seat };
 }
 
@@ -144,8 +147,9 @@ export function rejoinRoom(
     room.players.find(p => p.name === playerName);
   if (!player) return { success: false, error: '元の席が見つかりません' };
 
-  // 接続IDを新しいものへ張り替える（room 側とゲーム側の両方）。
+  // 接続IDを新しいものへ張り替え、オンライン状態に戻す（room 側とゲーム側の両方）。
   player.socketId = socketId;
+  player.connected = true;
   if (!player.token) player.token = token;
   if (room.game) {
     room.game.reassignSocket(player.seat, socketId);
@@ -294,22 +298,23 @@ export function handleChat(socketId: string, text: string): void {
   }
 }
 
-// 切断時の後始末。ここでは「対局前（waiting）」の抜けだけを扱う。
+// 切断時の後始末。待機中と対局中で扱いを分ける。
 export function handleDisconnect(socketId: string): void {
   const room = getRoomBySocketId(socketId);
   if (!room) return;
+
   if (room.status === 'waiting') {
-    // 抜けた本人を players から取り除く（filter は条件に合う要素だけ残した新配列を返す）。
+    // 待機中: 抜けた本人を players から取り除く（filter は条件に合う要素だけ残した新配列を返す）。
     room.players = room.players.filter(p => p.socketId !== socketId);
     if (room.players.length === 0) {
       // 誰もいなくなったルームは残しても無駄なので削除する。
       rooms.delete(room.id);
-    } else {
-      // 席番号に欠番ができないよう、残った人を前から 0,1,2... と振り直す。
-      room.players.forEach((p, i) => {
-        p.seat = i;
-      });
+      return;
     }
+    // 席番号に欠番ができないよう、残った人を前から 0,1,2... と振り直す。
+    room.players.forEach((p, i) => {
+      p.seat = i;
+    });
     // 残ったメンバーに「メンバーが変わった」最新状態を通知する。
     for (const p of room.players) {
       emitFn(p.socketId, 'room-update', {
@@ -318,6 +323,17 @@ export function handleDisconnect(socketId: string): void {
         roomName: room.name,
       });
     }
+    return;
+  }
+
+  // 対局中: 席はそのまま残し「切断中(connected=false)」にして再接続を待つ。
+  // ただし全員が切断したら、その部屋に戻れても意味がないので部屋ごと削除する
+  //（=次にその部屋へ自動復帰してしまう問題を防ぐ）。
+  const player = room.players.find(p => p.socketId === socketId);
+  if (player) player.connected = false;
+
+  if (room.players.every(p => !p.connected)) {
+    rooms.delete(room.id);
   }
 }
 
