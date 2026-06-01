@@ -5,6 +5,7 @@ import { useSocket } from "./hooks/useSocket";
 import { Lobby } from "./components/Lobby";
 import { WaitingRoom } from "./components/WaitingRoom";
 import { GameBoard } from "./components/GameBoard";
+import { Chat } from "./components/Chat";
 import { RoundResultModal } from "./components/RoundResult";
 import { previewGameView } from "./components/boardPreviewData";
 import "./App.css";
@@ -47,6 +48,7 @@ function Game() {
     getRooms,
     createRoom,
     joinRoom,
+    leaveRoom,
     startGame,
     discardTile,
     claimAction,
@@ -57,6 +59,7 @@ function Game() {
     declareKita,
     declareKyushuhai,
     readyNext,
+    sendChat,
     clearError,
   } = useSocket();
 
@@ -65,8 +68,24 @@ function Game() {
 
   // 状態変化に応じて自動で画面遷移を進める。
   // ※注意: 本来 useEffect の中で setState すべきだが、簡略化のため直接呼んでいる。
-  if (state.joinedRoomId && screen === "lobby") setScreen("waiting");
-  if (state.gameView && screen === "waiting") setScreen("game");
+  // gameView があれば（再接続で対局中に復帰した場合も含め）ゲーム画面、
+  // それ以外で部屋に居れば待機室、というように状態から画面を決める。
+  if (state.gameView && screen !== "game") setScreen("game");
+  else if (state.joinedRoomId && !state.gameView && screen === "lobby") setScreen("waiting");
+  // 部屋から抜けたらロビーに戻す。
+  if (!state.joinedRoomId && screen !== "lobby") setScreen("lobby");
+
+  // リロード直後の自動復帰中はローディングを出して、ロビー画面のちらつきを防ぐ。
+  if (state.reconnecting) {
+    return (
+      <div className="app">
+        <div className="reconnecting-screen">
+          <div className="reconnecting-spinner" />
+          <p>対局に復帰しています...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app">
@@ -97,6 +116,7 @@ function Game() {
           // `??` は左が null/undefined なら右の値（フォールバック）
           mySeat={state.mySeat ?? 0}
           onStartGame={startGame}
+          onLeave={leaveRoom}
         />
       )}
 
@@ -123,6 +143,12 @@ function Game() {
               onReady={readyNext}
             />
           )}
+          {/* 右下の対局中チャット */}
+          <Chat
+            messages={state.chatMessages}
+            mySeat={state.gameView.mySeat}
+            onSend={sendChat}
+          />
         </>
       )}
 

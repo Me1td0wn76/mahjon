@@ -18,6 +18,8 @@ import {
   getRoomList,
   createRoom,
   joinRoom,
+  rejoinRoom,
+  leaveRoom,
   startGame,
   handleDiscard,
   handleClaim,
@@ -28,6 +30,7 @@ import {
   handleKita,
   handleKyushuhai,
   handleReadyNext,
+  handleChat,
   handleDisconnect,
   getRoomPlayers,
   getRoomBySocketId,
@@ -148,7 +151,8 @@ io.on('connection', socket => {
       data.playerName,
       data.name,
       data.maxPlayers,
-      data.password
+      data.password,
+      data.token
     );
     // 作成に成功し roomId が確定したときだけ、後続の入室・通知を行う。
     // （&& は左が真のときだけ右を評価するので、roomId が無いのに使ってしまう事故を防げる）
@@ -169,7 +173,7 @@ io.on('connection', socket => {
 
   // 既存ルームへの入室。パスワード付きルームにも対応するため password を受け取る。
   socket.on('join-room', (data, callback) => {
-    const result = joinRoom(socket.id, data.playerName, data.roomId, data.password);
+    const result = joinRoom(socket.id, data.playerName, data.roomId, data.password, data.token);
     if (result.success) {
       socket.join(data.roomId);
       // 通知には maxPlayers などルームの情報が必要なので、ルーム本体を取り直す。
@@ -185,6 +189,35 @@ io.on('connection', socket => {
       }
     }
     callback(result);
+  });
+
+  // リロード後の再接続。token で本人を特定して席へ戻し、現在の状態を送り直す。
+  socket.on('rejoin', (data, callback) => {
+    const result = rejoinRoom(socket.id, data.roomId, data.playerName, data.token);
+    if (result.success) {
+      socket.join(data.roomId);
+      const room = getRoomBySocketId(socket.id);
+      if (room?.game) {
+        // 対局中: 復帰した本人に現在の盤面を送る。
+        const view = room.game.getViewForPlayer(socket.id);
+        if (view) io.to(socket.id).emit('game-update', view);
+      } else if (room) {
+        // 待機中: ルーム情報を送る。
+        io.to(data.roomId).emit('room-update', {
+          players: getRoomPlayers(socket.id),
+          maxPlayers: room.maxPlayers,
+          roomName: room.name,
+        });
+      }
+    }
+    callback({ success: result.success, seat: result.seat, error: result.error });
+  });
+
+  // 明示的に部屋を抜ける。
+  socket.on('leave-room', () => {
+    const room = getRoomBySocketId(socket.id);
+    leaveRoom(socket.id);
+    if (room) socket.leave(room.id);
   });
 
   // ゲーム開始要求。startGame は開始できたかを真偽値で返す。
@@ -239,6 +272,11 @@ io.on('connection', socket => {
   // 局の結果表示後、「次へ進む準備ができた」の合図。全員揃ったら次局へ進む。
   socket.on('ready-next', () => {
     handleReadyNext(socket.id);
+  });
+
+  // チャット送信。本人の部屋の全員へ配信される。
+  socket.on('chat-send', text => {
+    handleChat(socket.id, text);
   });
 
   // 切断時（ブラウザを閉じた・回線が切れた等）に自動で発火する特別なイベント。

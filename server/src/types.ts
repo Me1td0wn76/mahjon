@@ -11,6 +11,9 @@ export interface Tile {
   id: string;       // 同じ牌でも個別に判別するためのユニークID (例: "man_5_2")
   suit: Suit;       // 牌の種類（上の Suit 型のいずれか）
   value: number;    // 数字。数牌は1-9、字牌は1-7（1-4=東南西北、5=白 6=発 7=中）
+  // 赤ドラ（赤5）かどうか。各色の5に1枚だけ存在し、持っていると1枚につき1飜加算される。
+  // 通常の5と「種類・数字」は同じなので、面子判定や待ち判定では普通の5として扱う。
+  red?: boolean;
 }
 
 // 鳴き（チー・ポン・カン）の情報をまとめた型
@@ -148,7 +151,17 @@ export interface ServerToClientEvents {
   'game-start': (view: GameView) => void;
   'game-update': (view: GameView) => void;
   'round-end': (result: RoundResult) => void;
+  // チャットメッセージの配信（同じ部屋の全員へ）。
+  'chat-message': (msg: ChatMessage) => void;
   error: (message: string) => void;
+}
+
+// 1件のチャットメッセージ。
+export interface ChatMessage {
+  seat: number;        // 発言者の席番号
+  name: string;        // 発言者名
+  text: string;        // 本文
+  ts: number;          // 送信時刻（ミリ秒）。表示順や key に使う
 }
 
 // クライアント → サーバー へ送るイベント一覧。
@@ -156,13 +169,20 @@ export interface ServerToClientEvents {
 export interface ClientToServerEvents {
   'get-rooms': (callback: (rooms: RoomInfo[]) => void) => void;
   'create-room': (
-    data: { name: string; maxPlayers: 3 | 4; playerName: string; password?: string },
+    data: { name: string; maxPlayers: 3 | 4; playerName: string; password?: string; token?: string },
     callback: (result: { success: boolean; roomId?: string; error?: string }) => void
   ) => void;
   'join-room': (
-    data: { roomId: string; playerName: string; password?: string },
+    data: { roomId: string; playerName: string; password?: string; token?: string },
     callback: (result: { success: boolean; seat?: number; error?: string }) => void
   ) => void;
+  // リロード後の再接続。token で「同じ人」を特定して席に戻す。
+  rejoin: (
+    data: { roomId: string; playerName: string; token: string },
+    callback: (result: { success: boolean; seat?: number; error?: string }) => void
+  ) => void;
+  // 部屋から明示的に抜ける。
+  'leave-room': () => void;
   'start-game': () => void;
   'discard-tile': (tileId: string) => void;
   claim: (claim: ClaimRequest) => void;
@@ -173,4 +193,5 @@ export interface ClientToServerEvents {
   'declare-kita': () => void;                        // 三麻の北抜き
   'declare-kyushuhai': () => void;                   // 九種九牌で流局宣言
   'ready-next': () => void;
+  'chat-send': (text: string) => void;              // チャット送信
 }

@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 // `type` キーワード付きインポートは「型としてのみ使う」ことを明示。バンドルサイズを減らせる。
-import type { GameView, RoomInfo, RoundResult } from '../types/mahjong';
+import type { GameView, RoomInfo, RoundResult, ChatMessage } from '../types/mahjong';
 
 // Vite の環境変数。`VITE_` 接頭辞付きの変数だけがクライアントに公開される。
 // 設定が無ければデフォルトで localhost:3001 に接続。
@@ -26,7 +26,54 @@ export interface SocketState {
   } | null;
   joinedRoomId: string | null;                               // 入っているルームID
   mySeat: number | null;                                     // 自分の席番号
+  myName: string | null;                                     // 自分のプレイヤー名（席の再計算に使う）
   error: string | null;                                      // エラーメッセージ
+  reconnecting: boolean;                                     // リロード後の自動復帰を試行中か
+  chatMessages: ChatMessage[];                               // 受信したチャット履歴
+}
+
+// --- セッション情報の永続化 ---
+// リロードしても部屋に復帰できるよう、接続情報を localStorage に保存する。
+// playerToken は「同じ人」だとサーバーに伝えるための ID（socket.id はリロードで変わるため）。
+const SESSION_KEY = 'mahjong-session';
+
+interface SavedSession {
+  roomId: string;
+  playerName: string;
+  token: string;
+}
+
+// このブラウザ固有の playerToken を取得（無ければ生成して保存）。
+function getPlayerToken(): string {
+  const KEY = 'mahjong-token';
+  let token = localStorage.getItem(KEY);
+  if (!token) {
+    // crypto.randomUUID が無い古い環境向けのフォールバックも用意。
+    token =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `tk_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    localStorage.setItem(KEY, token);
+  }
+  return token;
+}
+
+function saveSession(s: SavedSession): void {
+  localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+}
+
+function loadSession(): SavedSession | null {
+  const raw = localStorage.getItem(SESSION_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as SavedSession;
+  } catch {
+    return null;
+  }
+}
+
+function clearSession(): void {
+  localStorage.removeItem(SESSION_KEY);
 }
 
 /**
@@ -49,7 +96,11 @@ export function useSocket() {
     roomInfo: null,
     joinedRoomId: null,
     mySeat: null,
+    myName: null,
     error: null,
+    // 保存済みセッションがあれば、最初から「復帰中」として扱い初期画面をちらつかせない。
+    reconnecting: loadSession() !== null,
+    chatMessages: [],
   });
 
   // useEffect: 「初回マウント時に1回だけ実行したい処理」を書く。
@@ -61,9 +112,36 @@ export function useSocket() {
 
     // setState の引数に関数を渡すと「前の状態」を受け取れる。
     // 状態の一部だけ更新する時は `{ ...s, ... }` で展開してから上書きするのが定石。
-    socket.on('connect', () =>
-      setState(s => ({ ...s, connected: true, error: null }))
-    );
+    socket.on('connect', () => {
+      setState(s => ({ ...s, connected: true, error: null }));
+      // 接続できたら、保存済みセッションがあるか確認して自動復帰を試みる。
+      // socket.id はリロードで変わるので、token で「同じ人」だとサーバーに伝える。
+      const session = loadSession();
+      if (session) {
+        socket.emit(
+          'rejoin',
+          { roomId: session.roomId, playerName: session.playerName, token: session.token },
+          (result: { success: boolean; seat?: number; error?: string }) => {
+            if (result.success) {
+              // 復帰成功。席と名前を復元（画面は gameView / roomInfo の到着で切り替わる）。
+              setState(s => ({
+                ...s,
+                joinedRoomId: session.roomId,
+                mySeat: result.seat ?? s.mySeat,
+                myName: session.playerName,
+                reconnecting: false,
+              }));
+            } else {
+              // 部屋がもう無い等で復帰できないときは、保存情報を破棄してロビーへ。
+              clearSession();
+              setState(s => ({ ...s, reconnecting: false }));
+            }
+          }
+        );
+      } else {
+        setState(s => ({ ...s, reconnecting: false }));
+      }
+    });
     socket.on('disconnect', () =>
       setState(s => ({ ...s, connected: false }))
     );
@@ -71,7 +149,18 @@ export function useSocket() {
       setState(s => ({ ...s, rooms }))
     );
     socket.on('room-update', data =>
-      setState(s => ({ ...s, roomInfo: data }))
+      // 待機室の情報を更新。あわせて、自分の名前から「今の自分の席」を計算し直す。
+      // 誰かが抜けるとサーバー側で席が振り直されるため、保持していた mySeat がズレるのを防ぐ。
+      setState(s => {
+        const mine = s.myName
+          ? data.players.find((p: { name: string; seat: number }) => p.name === s.myName)
+          : undefined;
+        return {
+          ...s,
+          roomInfo: data,
+          mySeat: mine ? mine.seat : s.mySeat,
+        };
+      })
     );
     socket.on('game-start', view =>
       // ゲーム開始時は前回の局結果をクリア
@@ -85,6 +174,10 @@ export function useSocket() {
     );
     socket.on('error', msg =>
       setState(s => ({ ...s, error: msg }))
+    );
+    socket.on('chat-message', (msg: ChatMessage) =>
+      // 履歴に追記。増えすぎないよう直近100件だけ保持する。
+      setState(s => ({ ...s, chatMessages: [...s.chatMessages, msg].slice(-100) }))
     );
 
     // クリーンアップ関数: コンポーネントがアンマウントされたら接続を切る
@@ -108,9 +201,12 @@ export function useSocket() {
   const createRoom = useCallback(
     (name: string, maxPlayers: 3 | 4, playerName: string, password?: string) =>
       new Promise<{ success: boolean; roomId?: string; error?: string }>(resolve => {
-        socketRef.current?.emit('create-room', { name, maxPlayers, playerName, password }, (result: { success: boolean; roomId?: string; error?: string }) => {
+        const token = getPlayerToken();
+        socketRef.current?.emit('create-room', { name, maxPlayers, playerName, password, token }, (result: { success: boolean; roomId?: string; error?: string }) => {
           if (result.success && result.roomId) {
-            setState(s => ({ ...s, joinedRoomId: result.roomId!, mySeat: 0 }));
+            // リロード復帰用にセッションを保存する。
+            saveSession({ roomId: result.roomId, playerName, token });
+            setState(s => ({ ...s, joinedRoomId: result.roomId!, mySeat: 0, myName: playerName }));
           }
           resolve(result);
         });
@@ -122,15 +218,32 @@ export function useSocket() {
   const joinRoom = useCallback(
     (roomId: string, playerName: string, password?: string) =>
       new Promise<{ success: boolean; seat?: number; error?: string }>(resolve => {
-        socketRef.current?.emit('join-room', { roomId, playerName, password }, (result: { success: boolean; seat?: number; error?: string }) => {
+        const token = getPlayerToken();
+        socketRef.current?.emit('join-room', { roomId, playerName, password, token }, (result: { success: boolean; seat?: number; error?: string }) => {
           if (result.success) {
-            setState(s => ({ ...s, joinedRoomId: roomId, mySeat: result.seat ?? null }));
+            saveSession({ roomId, playerName, token });
+            setState(s => ({ ...s, joinedRoomId: roomId, mySeat: result.seat ?? null, myName: playerName }));
           }
           resolve(result);
         });
       }),
     []
   );
+
+  /** 部屋を離れる（セッション破棄）。ロビーへ戻すときに使う。 */
+  const leaveRoom = useCallback(() => {
+    clearSession();
+    socketRef.current?.emit('leave-room');
+    setState(s => ({
+      ...s,
+      joinedRoomId: null,
+      mySeat: null,
+      myName: null,
+      gameView: null,
+      roundResult: null,
+      roomInfo: null,
+    }));
+  }, []);
 
   /** ゲーム開始（ホストのみ意味がある） */
   const startGame = useCallback(() => {
@@ -187,6 +300,13 @@ export function useSocket() {
     setState(s => ({ ...s, roundResult: null }));
   }, []);
 
+  /** チャットを送信する */
+  const sendChat = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    socketRef.current?.emit('chat-send', trimmed);
+  }, []);
+
   /** エラーメッセージを消す */
   const clearError = useCallback(() => {
     setState(s => ({ ...s, error: null }));
@@ -198,6 +318,7 @@ export function useSocket() {
     getRooms,
     createRoom,
     joinRoom,
+    leaveRoom,
     startGame,
     discardTile,
     claimAction,
@@ -208,6 +329,7 @@ export function useSocket() {
     declareKita,
     declareKyushuhai,
     readyNext,
+    sendChat,
     clearError,
   };
 }

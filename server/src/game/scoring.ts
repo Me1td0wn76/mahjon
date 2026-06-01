@@ -54,6 +54,11 @@ function countDora(tiles: Tile[], indicators: Tile[]): number {
   return count;
 }
 
+/** 手牌（鳴き含む）の中の赤ドラ（赤5）の枚数を数える。1枚につき1飜。 */
+function countRedDora(tiles: Tile[]): number {
+  return tiles.filter(t => t.red).length;
+}
+
 /**
  * 手牌を「面子の組み合わせ」に分解する。複数の組み方があり得るので、
  * 最も高い役になる組み合わせを探すために使う。
@@ -713,6 +718,8 @@ export function calculateScore(
   const allFinalTiles = [...fullClosed, ...openMelds.flatMap(m => m.tiles)];
   const doraHan = countDora(allFinalTiles, opts.doraIndicators ?? []);
   const uraHan = isRiichi ? countDora(allFinalTiles, opts.uraDoraIndicators ?? []) : 0;
+  // 赤ドラ（赤5）の枚数。ドラ表示牌とは無関係に、赤5を持っているだけで加算される。
+  const redHan = countRedDora(allFinalTiles);
 
   // 候補の中から「点数（基本点）が最大」になる組み合わせを採用する（高点法）。
   // 関数の中で型を宣言することもできる。ここでしか使わないので局所的に定義している。
@@ -729,6 +736,7 @@ export function calculateScore(
     if (kitaCount > 0) { finalYaku.push({ name: `抜きドラ(北×${kitaCount})`, han: kitaCount }); han += kitaCount; }
     if (doraHan > 0) { finalYaku.push({ name: 'ドラ', han: doraHan }); han += doraHan; }
     if (uraHan > 0) { finalYaku.push({ name: '裏ドラ', han: uraHan }); han += uraHan; }
+    if (redHan > 0) { finalYaku.push({ name: '赤ドラ', han: redHan }); han += redHan; }
     const basePoint = fuHanToBasePoint(fu, han);
     const current: Candidate | null = best;
     if (!current || basePoint > current.basePoint || (basePoint === current.basePoint && han > current.han)) {

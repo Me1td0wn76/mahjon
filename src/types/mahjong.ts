@@ -10,6 +10,7 @@ export interface Tile {
   id: string;
   suit: Suit;
   value: number;
+  red?: boolean;     // 赤ドラ（赤5）かどうか。表示を赤くするために使う
 }
 
 // 鳴き面子（チー・ポン・カン）
@@ -95,6 +96,14 @@ export interface RoundResult {
   newScores: Record<number, number>;
 }
 
+// 1件のチャットメッセージ（サーバーと同じ構造）
+export interface ChatMessage {
+  seat: number;
+  name: string;
+  text: string;
+  ts: number;
+}
+
 // ロビーで表示するルーム情報
 export interface RoomInfo {
   id: string;
@@ -121,8 +130,11 @@ export const SUIT_CHARS: Record<string, string> = { man: '萬', pin: '筒', sou:
 
 /**
  * 1枚の牌を日本語ラベルに変換するヘルパ。UI 表示用。
+ * tile が undefined になり得る場面（古いIDを参照した直後など）でも
+ * クラッシュしないよう、念のため防御的に空文字を返す。
  */
-export function getTileName(tile: Tile): string {
+export function getTileName(tile: Tile | undefined | null): string {
+  if (!tile) return '';
   if (tile.suit === 'honor') return HONOR_NAMES[tile.value - 1];
   return `${tile.value}${SUIT_CHARS[tile.suit]}`;
 }

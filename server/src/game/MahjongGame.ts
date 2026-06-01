@@ -26,7 +26,7 @@ const RIICHI_STICK = 1000;
 // クラス内部だけで使うプレイヤー状態。types.ts の PlayerView と違い、
 // 手牌の中身など「本人にしか見せない秘密情報」もここに持つ（外には出さない）。
 interface PlayerState {
-  socketId: string;
+  socketId: string;        // 接続ID（リロード再接続で張り替えられる）
   name: string;
   seat: number;
   hand: Tile[];                            // 手牌（秘密情報）
@@ -1092,5 +1092,19 @@ export class MahjongGame {
 
   getPlayerCount(): number {
     return this.playerCount;
+  }
+
+  /**
+   * リロード再接続時に、指定席の接続ID(socketId)を新しいものに張り替える。
+   * これ以降 getViewForPlayer や emit が新しい接続へ正しく届くようになる。
+   */
+  reassignSocket(seat: number, newSocketId: string): void {
+    const player = this.players.find(p => p.seat === seat);
+    if (player) player.socketId = newSocketId;
+  }
+
+  /** 指定席のプレイヤーの現在の socketId を返す（再接続後の状態送信に使う）。 */
+  getSocketIdBySeat(seat: number): string | undefined {
+    return this.players.find(p => p.seat === seat)?.socketId;
   }
 }

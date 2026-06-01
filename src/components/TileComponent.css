@@ -70,6 +70,18 @@
   box-shadow: 2px 3px 6px rgba(0, 0, 0, 0.55);
 }
 
+/* 赤ドラ（赤5）: 牌全体をほんのり赤く、数字を鮮やかな赤で表示して見分けやすくする。
+   .tile.tile-red と2クラス重ねて、種類ごとの色指定より優先させている。 */
+.tile-red {
+  background: linear-gradient(160deg, #fff0ec 0%, #f6d6cc 100%);
+  border-color: #d05a4a;
+}
+.tile.tile-red .tile-num,
+.tile.tile-red .tile-suit-char {
+  color: #e01010;
+  text-shadow: 0 0 2px rgba(224, 16, 16, 0.4);
+}
+
 /* Suit colors */
 .tile-man .tile-num,
 .tile-man .tile-suit-char {

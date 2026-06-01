@@ -21,8 +21,11 @@ export function createTileset(playerCount: 3 | 4): Tile[] {
       if (playerCount === 3 && suit === 'man' && value >= 2 && value <= 8) continue;
       // 同じ牌は4枚ずつ（東西南北とは関係ない単なる枚数）
       for (let copy = 0; copy < 4; copy++) {
+        // 赤ドラ: 各色の「5」の4枚のうち1枚（copy=0）だけを赤5にする。
+        // 通常の5と種類・数字は同じだが、red フラグで点数計算時に1飜加算される。
+        const isRed = value === 5 && copy === 0;
         // テンプレート文字列でID生成 (例: "man_5_0", "man_5_1", ...)
-        tiles.push({ id: `${suit}_${value}_${copy}`, suit, value });
+        tiles.push({ id: `${suit}_${value}_${copy}`, suit, value, red: isRed });
       }
     }
   }

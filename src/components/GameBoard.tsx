@@ -61,24 +61,31 @@ const FaceDownWall: React.FC<{ count: number; orientation: 'h' | 'v' }> = ({
 
 // プレイヤーの「河（捨て牌の列）」を描画する
 // lastSeat が true のときは最後の捨て牌をハイライト表示
+// rotate は牌の回転角（度）。本物の麻雀卓のように各家の河を内側へ向けるために使う。
+//   0=自家（そのまま）, 180=対面（上下反転）, -90=上家（左）, 90=下家（右）
+// 90/-90 のときは牌を横倒しにするので、外側の span を横長サイズにして重なりを防ぐ。
 const River: React.FC<{
   tiles: Tile[];
   orientation: 'h' | 'v';
+  rotate?: 0 | 90 | -90 | 180;
   lastSeat?: boolean;
   accent?: string;
-}> = ({ tiles, orientation, lastSeat, accent }) => (
+}> = ({ tiles, orientation, rotate = 0, lastSeat, accent }) => (
   <div
-    className={`river river-${orientation}`}
+    className={`river river-${orientation}${rotate ? ` river-rot${rotate}` : ''}`}
     // プレイヤーごとの色マットにして「誰の河か」を一目で分かるようにする
     style={accent ? { boxShadow: `inset 0 0 0 2px ${accent}88` } : undefined}
   >
     {tiles.map((t, i) => (
-      <TileComponent
-        key={t.id}
-        tile={t}
-        small
-        highlight={lastSeat && i === tiles.length - 1}
-      />
+      // 回転は内側の牌に掛け、外側の span はレイアウト用の枠として使う。
+      // （CSS の transform はレイアウト上の大きさを変えないため、枠で場所を確保する）
+      <span className="river-tile" key={t.id}>
+        <TileComponent
+          tile={t}
+          small
+          highlight={lastSeat && i === tiles.length - 1}
+        />
+      </span>
     ))}
   </div>
 );
@@ -258,8 +265,16 @@ export const GameBoard: React.FC<Props> = ({
   } = gameView;
 
   const pc = players.length;
-  // 自分のプレイヤー情報。`!` は「絶対 undefined ではない」と教えるアサーション
-  const me = players.find(p => p.seat === mySeat)!;
+  // 自分のプレイヤー情報。再接続直後などで mySeat が一時的にズレても落ちないよう、
+  // 見つからなければ players[0] にフォールバックする（`!` で断言せず安全側に倒す）。
+  const me = players.find(p => p.seat === mySeat) ?? players[0];
+
+  // 選択中の牌・カン候補の牌は「現在の手牌に存在するもの」だけを参照する。
+  // game-update で手牌が更新されると、古い selectedId / option が指す牌が消えていることがあり、
+  // それを getTileName / TileComponent に渡すと tile.suit 参照で undefined エラーになるため。
+  const selectedTile = selectedId ? myHand.find(t => t.id === selectedId) : undefined;
+  const validAnkanOptions = (ankanOptions ?? []).filter(id => myHand.some(t => t.id === id));
+  const validKakanOptions = (kakanOptions ?? []).filter(id => myHand.some(t => t.id === id));
 
   // 自分の席を基準に、相対位置の席番号を計算する
   // 手番の進行順は seat+1, seat+2, ... なので
@@ -436,6 +451,7 @@ export const GameBoard: React.FC<Props> = ({
               <River
                 tiles={topPlayer.discards}
                 orientation="h"
+                rotate={180}
                 lastSeat={lastDiscard?.seat === topPlayer.seat}
                 accent={AVATAR_COLORS[topPlayer.seat % 4]}
               />
@@ -446,6 +462,7 @@ export const GameBoard: React.FC<Props> = ({
               <River
                 tiles={leftPlayer.discards}
                 orientation="v"
+                rotate={90}
                 lastSeat={lastDiscard?.seat === leftPlayer.seat}
                 accent={AVATAR_COLORS[leftPlayer.seat % 4]}
               />
@@ -495,6 +512,7 @@ export const GameBoard: React.FC<Props> = ({
               <River
                 tiles={rightPlayer.discards}
                 orientation="v"
+                rotate={-90}
                 lastSeat={lastDiscard?.seat === rightPlayer.seat}
                 accent={AVATAR_COLORS[rightPlayer.seat % 4]}
               />
@@ -535,15 +553,15 @@ export const GameBoard: React.FC<Props> = ({
         <div className="action-panel">
           {isMyTurn && (
             <div className="action-row">
-              {selectedId && !riichiMode && (
+              {selectedTile && !riichiMode && (
                 <button
                   className="btn-action discard"
                   onClick={() => {
-                    onDiscard(selectedId);
+                    onDiscard(selectedTile.id);
                     setSelectedId(null);
                   }}
                 >
-                  {getTileName(myHand.find(t => t.id === selectedId)!)} を捨てる
+                  {getTileName(selectedTile)} を捨てる
                 </button>
               )}
               {canTsumo && (
@@ -573,23 +591,23 @@ export const GameBoard: React.FC<Props> = ({
                 </>
               )}
               {/* 暗槓ボタン（同じ牌4枚） */}
-              {onAnkan && !riichiMode && ankanOptions?.map(tileId => (
+              {onAnkan && !riichiMode && validAnkanOptions.map(tileId => (
                 <button
                   key={`ankan-${tileId}`}
                   className="btn-action kan"
                   onClick={() => onAnkan(tileId)}
                 >
-                  暗槓 {getTileName(myHand.find(t => t.id === tileId)!)}
+                  暗槓 {getTileName(myHand.find(t => t.id === tileId))}
                 </button>
               ))}
               {/* 加槓ボタン（ポンに足す） */}
-              {onKakan && !riichiMode && kakanOptions?.map(tileId => (
+              {onKakan && !riichiMode && validKakanOptions.map(tileId => (
                 <button
                   key={`kakan-${tileId}`}
                   className="btn-action kan"
                   onClick={() => onKakan(tileId)}
                 >
-                  加槓 {getTileName(myHand.find(t => t.id === tileId)!)}
+                  加槓 {getTileName(myHand.find(t => t.id === tileId))}
                 </button>
               ))}
               {/* 三麻の北抜きボタン */}

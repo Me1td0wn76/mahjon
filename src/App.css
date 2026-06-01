@@ -4,3 +4,21 @@
   background: rgba(180,30,30,0.9); color: #fff;
   text-align: center; padding: 10px; font-weight: 700; z-index: 200;
 }
+
+/* リロード後の自動復帰中に表示するローディング画面 */
+.reconnecting-screen {
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 18px; color: #e8e8e8;
+  background: #1d2230;
+}
+.reconnecting-screen p { font-size: 16px; font-weight: 600; }
+.reconnecting-spinner {
+  width: 42px; height: 42px;
+  border: 4px solid rgba(255,255,255,0.2);
+  border-top-color: #4fa06a;
+  border-radius: 50%;
+  animation: reconnect-spin 0.9s linear infinite;
+}
+@keyframes reconnect-spin { to { transform: rotate(360deg); } }

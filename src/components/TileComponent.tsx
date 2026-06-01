@@ -39,12 +39,18 @@ export const TileComponent: React.FC<Props> = ({
   dimmed,
   highlight,
 }) => {
+  // 防御: tile が undefined/null のときは何も描画しない。
+  // 古い牌IDを参照した直後などに undefined が渡ってもクラッシュさせないため。
+  if (!tile) return null;
+
   // 条件に応じたクラス名を配列で集めて、空文字を除いてスペースで結合。
   // CSSクラスを動的に組み立てる典型パターン。
   const cls = [
     'tile',
     faceDown ? 'tile-face-down' : `tile-${tile.suit}`,
     tile.suit === 'honor' && !faceDown ? honorClass(tile.value) : '',
+    // 赤ドラ（赤5）は数字を赤く表示するためのクラスを付ける
+    tile.red && !faceDown ? 'tile-red' : '',
     selected ? 'tile-selected' : '',
     small ? 'tile-small' : '',
     dimmed ? 'tile-dimmed' : '',

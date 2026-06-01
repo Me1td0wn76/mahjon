@@ -1,13 +1,16 @@
 // このファイルは「ルーム（部屋）」の管理を担当します。
 // パスワード付き（プライベート）ルーム、リーチ・北抜き・九種九牌の取り次ぎなどを行います。
 import { MahjongGame } from './game/MahjongGame.js';
-import { RoomInfo, ClaimRequest, RoundResult } from './types.js';
+import { RoomInfo, ClaimRequest, RoundResult, ChatMessage } from './types.js';
 
 // ルームに参加している1人分の情報。
 interface RoomPlayer {
-  socketId: string;        // その人の接続ID（Socket.IO が割り振る）
+  socketId: string;        // その人の接続ID（Socket.IO が割り振る／リロードで変わる）
   name: string;            // プレイヤー名
   seat: number;            // 席番号（0始まり）
+  // リロードしても「同じ人」だと特定するための安定したID。
+  // socketId は再接続で変わるが、token はブラウザに保存され変わらない。
+  token?: string;
 }
 
 // 1つのルームの情報。
@@ -70,7 +73,8 @@ export function createRoom(
   playerName: string,
   roomName: string,
   maxPlayers: 3 | 4,
-  password?: string
+  password?: string,
+  token?: string
 ): { success: boolean; roomId?: string; error?: string } {
   const roomId = genId();
   // Map に新しいルームを登録する。作った本人は seat: 0（最初の席）で参加扱い。
@@ -78,7 +82,7 @@ export function createRoom(
     id: roomId,
     name: roomName,
     maxPlayers,
-    players: [{ socketId, name: playerName, seat: 0 }],
+    players: [{ socketId, name: playerName, seat: 0, token }],
     status: 'waiting',
     // パスワードが「空白だけ」や未入力なら undefined（＝鍵なし）にそろえる。
     // .trim() で前後の空白を除き、空文字を誤って有効なパスワードにしないため。
@@ -94,7 +98,8 @@ export function joinRoom(
   socketId: string,
   playerName: string,
   roomId: string,
-  password?: string
+  password?: string,
+  token?: string
 ): { success: boolean; seat?: number; error?: string } {
   const room = rooms.get(roomId);
   // 参加できない条件を先にひとつずつ弾く（早期リターン）。
@@ -115,8 +120,44 @@ export function joinRoom(
 
   // 新しい席番号は「今の人数」。0,1,2... と詰めて割り当たる。
   const seat = room.players.length;
-  room.players.push({ socketId, name: playerName, seat });
+  room.players.push({ socketId, name: playerName, seat, token });
   return { success: true, seat };
+}
+
+/**
+ * リロード後の再接続。token で本人を特定し、socketId を新しいものに張り替える。
+ * 対局中（game あり）でも席に戻れるよう、ゲーム側の socketId も更新する。
+ */
+export function rejoinRoom(
+  socketId: string,
+  roomId: string,
+  playerName: string,
+  token: string
+): { success: boolean; seat?: number; error?: string; inGame?: boolean } {
+  const room = rooms.get(roomId);
+  if (!room) return { success: false, error: 'ルームが見つかりません' };
+
+  // まず token で本人を探す。token が一致すれば、同じ人がリロードしたと判断できる。
+  // token が無い古いセッション向けに、名前一致もフォールバックとして許容する。
+  const player =
+    room.players.find(p => p.token && p.token === token) ??
+    room.players.find(p => p.name === playerName);
+  if (!player) return { success: false, error: '元の席が見つかりません' };
+
+  // 接続IDを新しいものへ張り替える（room 側とゲーム側の両方）。
+  player.socketId = socketId;
+  if (!player.token) player.token = token;
+  if (room.game) {
+    room.game.reassignSocket(player.seat, socketId);
+  }
+  return { success: true, seat: player.seat, inGame: room.status === 'playing' };
+}
+
+/**
+ * 明示的に部屋を抜ける。待機中なら disconnect と同じ後始末を行う。
+ */
+export function leaveRoom(socketId: string): void {
+  handleDisconnect(socketId);
 }
 
 // 接続IDから、その人が入っているルームを探す。
@@ -225,6 +266,32 @@ export function handleKyushuhai(socketId: string): void {
 
 export function handleReadyNext(socketId: string): void {
   getRoomBySocketId(socketId)?.game?.handleReadyNext(socketId);
+}
+
+/**
+ * チャット送信。送信者の入っている部屋の全員に同じメッセージを配信する。
+ * 文字数は上限を設けて、極端に長い文字列でのいたずらを防ぐ。
+ */
+export function handleChat(socketId: string, text: string): void {
+  const room = getRoomBySocketId(socketId);
+  if (!room) return;
+  const sender = room.players.find(p => p.socketId === socketId);
+  if (!sender) return;
+
+  // 前後の空白を除き、空なら無視。長すぎる場合は200文字に切り詰める。
+  const trimmed = text.trim().slice(0, 200);
+  if (!trimmed) return;
+
+  const msg: ChatMessage = {
+    seat: sender.seat,
+    name: sender.name,
+    text: trimmed,
+    ts: Date.now(),
+  };
+  // 部屋の全員へ配信。
+  for (const p of room.players) {
+    emitFn(p.socketId, 'chat-message', msg);
+  }
 }
 
 // 切断時の後始末。ここでは「対局前（waiting）」の抜けだけを扱う。

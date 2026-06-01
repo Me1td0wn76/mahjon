@@ -16,6 +16,7 @@ interface Props {
   players: Player[];
   mySeat: number;                                            // 自分の席（ホスト判定に使う）
   onStartGame: () => void;
+  onLeave?: () => void;                                      // 部屋を抜けてロビーへ戻る
 }
 
 // 席番号 → 風の漢字に対応する配列
@@ -27,6 +28,7 @@ export const WaitingRoom: React.FC<Props> = ({
   players,
   mySeat,
   onStartGame,
+  onLeave,
 }) => {
   // 満席かどうかを計算
   const isFull = players.length >= maxPlayers;
@@ -83,6 +85,13 @@ export const WaitingRoom: React.FC<Props> = ({
         {/* ホスト以外には案内文を表示 */}
         {mySeat !== 0 && (
           <div className="waiting-host">部屋の作成者がゲームを開始するまでお待ちください</div>
+        )}
+
+        {/* 部屋を抜けてロビーに戻る */}
+        {onLeave && (
+          <button className="btn-leave" onClick={onLeave}>
+            退室する
+          </button>
         )}
       </div>
     </div>
