@@ -163,7 +163,6 @@ const PlayerPanel: React.FC<{
   <div className={`player-panel pos-${position} ${active ? 'active' : ''}`}>
     {/* アバター＋情報の行 */}
     <div className="panel-main">
-      {player.isRiichi && <div className="riichi-stick"></div>}
       <div className="avatar" style={{ background: color }}>
         {player.name.slice(0, 1)}
       </div>
@@ -474,6 +473,7 @@ export const GameBoard: React.FC<Props> = ({
                 lastSeat={lastDiscard?.seat === topPlayer.seat}
                 accent={AVATAR_COLORS[topPlayer.seat % 4]}
               />
+              {topPlayer.isRiichi && <div className="riichi-stick"></div>}
             </div>
           )}
           {leftPlayer && (
@@ -485,6 +485,7 @@ export const GameBoard: React.FC<Props> = ({
                 lastSeat={lastDiscard?.seat === leftPlayer.seat}
                 accent={AVATAR_COLORS[leftPlayer.seat % 4]}
               />
+              {leftPlayer.isRiichi && <div className="riichi-stick"></div>}
             </div>
           )}
 
@@ -528,6 +529,7 @@ export const GameBoard: React.FC<Props> = ({
 
           {rightPlayer && (
             <div className="river-slot slot-right">
+              {rightPlayer.isRiichi && <div className="riichi-stick"></div>}
               <River
                 tiles={rightPlayer.discards}
                 orientation="v"
@@ -538,6 +540,7 @@ export const GameBoard: React.FC<Props> = ({
             </div>
           )}
           <div className="river-slot slot-bottom">
+            {me.isRiichi && <div className="riichi-stick"></div>}
             <River
               tiles={me.discards}
               orientation="h"
