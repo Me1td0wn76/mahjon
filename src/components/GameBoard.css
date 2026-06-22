@@ -754,3 +754,36 @@
   }
   .my-hand .tile { flex-shrink: 0; }
 }
+
+/*リーチ棒のCSS（各家の河の手前＝中央側に表示）*/
+/* 河スロットを flex にして、河と点棒を中央側に並べる */
+.slot-top, .slot-bottom { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.slot-left, .slot-right { display: flex; flex-direction: row;    align-items: center; gap: 4px; }
+
+.riichi-stick {
+  width: 80px;
+  height: 11px;
+  background: #f5f0e6;
+  border: 1px solid #999;
+  border-radius: 3px;
+  position: relative;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  flex-shrink: 0;
+}
+
+.riichi-stick::after {
+  content: '';
+  position: absolute;
+  top: 50%;left: 50%;
+  transform: translate(-50%, -50%);
+  width: 6px;height: 6px;
+  background: #e0152b;
+  border-radius:50%;
+}
+
+/* 左右の家は点棒を縦向きにする（回転後の footprint を確保） */
+.slot-left .riichi-stick,
+.slot-right .riichi-stick {
+  width: 11px;
+  height: 80px;
+}
