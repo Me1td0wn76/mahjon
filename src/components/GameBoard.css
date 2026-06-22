@@ -761,8 +761,8 @@
 .slot-left, .slot-right { display: flex; flex-direction: row;    align-items: center; gap: 4px; }
 
 .riichi-stick {
-  width: 60px;
-  height: 9px;
+  width: 80px;
+  height: 11px;
   background: #f5f0e6;
   border: 1px solid #999;
   border-radius: 3px;
@@ -784,6 +784,6 @@
 /* 左右の家は点棒を縦向きにする（回転後の footprint を確保） */
 .slot-left .riichi-stick,
 .slot-right .riichi-stick {
-  width: 9px;
-  height: 60px;
+  width: 11px;
+  height: 80px;
 }
