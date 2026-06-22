@@ -163,6 +163,7 @@ const PlayerPanel: React.FC<{
   <div className={`player-panel pos-${position} ${active ? 'active' : ''}`}>
     {/* アバター＋情報の行 */}
     <div className="panel-main">
+      {player.isRiichi && <div className="riichi-stick"></div>}
       <div className="avatar" style={{ background: color }}>
         {player.name.slice(0, 1)}
       </div>
